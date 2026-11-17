@@ -86,7 +86,7 @@ fun HomeScreen(
     var seriesMenuFor by remember { mutableStateOf<com.simplecalculator.app.data.source.SeriesGroup?>(null) }
     var tagFilter by remember { mutableStateOf<String?>(null) }
     var flavorFilter by remember { mutableStateOf<HentaiFlavor?>(null) }
-    var uncensoredOnly by remember { mutableStateOf(false) }
+    var releaseFilter by remember { mutableStateOf<String?>(null) }
     var lastPrefetched by remember { mutableStateOf<String?>(null) }
     var sourceFilter by remember { mutableStateOf<String?>(null) }
     var failures by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -107,7 +107,18 @@ fun HomeScreen(
     suspend fun load(target: Int, reset: Boolean) {
         if (reset) {
             // Paint the previous session immediately, then stream fresh results.
-            val cached = runCatching { container.content.cachedFeed(category) }.getOrDefault(emptyList())
+            var cached = runCatching { container.content.cachedFeed(category) }.getOrDefault(emptyList())
+            // The instant paint must honour the active release pill.
+            when (releaseFilter) {
+                com.simplecalculator.app.data.repo.ContentRepository.RELEASE_UNCENSORED -> cached =
+                    cached.filter {
+                        com.simplecalculator.app.data.source.JavTitles.isUncensored(it.title, it.vkey)
+                    }
+                com.simplecalculator.app.data.repo.ContentRepository.RELEASE_SUBTITLED -> cached =
+                    cached.filter {
+                        com.simplecalculator.app.data.source.JavTitles.isSubtitled(it.title, it.vkey)
+                    }
+            }
             if (cached.isNotEmpty()) {
                 if (category == Category.HENTAI) {
                     groups = com.simplecalculator.app.data.source.SeriesStore.putAll(
@@ -126,7 +137,7 @@ fun HomeScreen(
         error = false
         runCatching {
             container.content.feedStream(
-                category, target, tagFilter, sourceFilter, uncensoredOnly
+                category, target, tagFilter, sourceFilter, releaseFilter
             ).collect { update ->
                     if (reset && update.items.isEmpty() && !update.done) return@collect
                     val mapped = if (category == Category.HENTAI) {
@@ -154,7 +165,7 @@ fun HomeScreen(
         loading = false
     }
 
-    LaunchedEffect(category, tagFilter, sourceFilter, flavorFilter, uncensoredOnly) {
+    LaunchedEffect(category, tagFilter, sourceFilter, flavorFilter, releaseFilter) {
         page = 1
         load(1, true)
     }
@@ -179,11 +190,11 @@ fun HomeScreen(
 
     val listSize = if (category == Category.HENTAI) groups.size else items.size
     // Warm page two while the user is still reading page one.
-    LaunchedEffect(category, tagFilter, sourceFilter, uncensoredOnly, listSize > 0) {
+    LaunchedEffect(category, tagFilter, sourceFilter, releaseFilter, listSize > 0) {
         if (listSize == 0 || loading) return@LaunchedEffect
         kotlinx.coroutines.delay(1_500)
         withContext(kotlinx.coroutines.Dispatchers.IO) {
-            container.content.prefetchPage(category, page + 1, tagFilter, sourceFilter, uncensoredOnly)
+            container.content.prefetchPage(category, page + 1, tagFilter, sourceFilter, releaseFilter)
         }
     }
 
@@ -201,7 +212,7 @@ fun HomeScreen(
         loadingMore = true
         val next = page + 1
         runCatching {
-            val more = container.content.feed(category, next, tagFilter, sourceFilter, uncensoredOnly)
+            val more = container.content.feed(category, next, tagFilter, sourceFilter, releaseFilter)
             if (more.isNotEmpty()) {
                 if (category == Category.HENTAI) {
                     val fresh = com.simplecalculator.app.data.source.SeriesStore
@@ -215,25 +226,6 @@ fun HomeScreen(
             failures = container.content.lastFailures
         }
         loadingMore = false
-    }
-
-    LaunchedEffect(shouldLoadMore) {
-        if (shouldLoadMore) {
-            page += 1
-            val next = page
-            // Later pages are appended; only the first page resets the list.
-            runCatching {
-                val more = container.content.feed(category, next, tagFilter, sourceFilter, uncensoredOnly)
-                if (category == Category.HENTAI) {
-                    val fresh = com.simplecalculator.app.data.source.SeriesStore
-                        .putAll(com.simplecalculator.app.data.source.SeriesGrouping.group(more))
-                    groups = (groups + fresh).distinctBy { it.key }
-                } else {
-                    items = (items + more).distinctBy { it.key }
-                }
-                failures = container.content.lastFailures
-            }
-        }
     }
 
     LazyVerticalGrid(
@@ -300,10 +292,38 @@ fun HomeScreen(
                     PillChips(
                         labels = listOf(
                             stringResource(R.string.jav_all),
-                            stringResource(R.string.jav_uncensored)
+                            stringResource(R.string.jav_uncensored),
+                            stringResource(R.string.release_subtitled)
                         ),
-                        selectedIndex = if (uncensoredOnly) 1 else 0,
-                        onSelect = { uncensoredOnly = it == 1 }
+                        selectedIndex = when (releaseFilter) {
+                            com.simplecalculator.app.data.repo.ContentRepository.RELEASE_UNCENSORED -> 1
+                            com.simplecalculator.app.data.repo.ContentRepository.RELEASE_SUBTITLED -> 2
+                            else -> 0
+                        },
+                        onSelect = { index ->
+                            releaseFilter = when (index) {
+                                1 -> com.simplecalculator.app.data.repo.ContentRepository.RELEASE_UNCENSORED
+                                2 -> com.simplecalculator.app.data.repo.ContentRepository.RELEASE_SUBTITLED
+                                else -> null
+                            }
+                        }
+                    )
+                }
+                if (category == Category.LIVE) {
+                    Spacer(Modifier.height(8.dp))
+                    PillChips(
+                        labels = listOf(
+                            stringResource(R.string.jav_all),
+                            stringResource(R.string.release_subtitled)
+                        ),
+                        selectedIndex = if (releaseFilter == com.simplecalculator.app.data.repo.ContentRepository.RELEASE_SUBTITLED) 1 else 0,
+                        onSelect = { index ->
+                            releaseFilter = if (index == 1) {
+                                com.simplecalculator.app.data.repo.ContentRepository.RELEASE_SUBTITLED
+                            } else {
+                                null
+                            }
+                        }
                     )
                 }
                 if (category == Category.HENTAI) {
@@ -400,6 +420,7 @@ fun HomeScreen(
                             failures.isNotEmpty() ->
                                 stringResource(R.string.source_unreachable) + " " +
                                     failures.joinToString(", ")
+                            releaseFilter != null -> stringResource(R.string.filter_release_empty)
                             error -> stringResource(R.string.home_empty_body)
                             tagFilter == null -> stringResource(R.string.home_empty_body)
                             else -> stringResource(R.string.filter_empty_body)

@@ -83,6 +83,7 @@ import com.simplecalculator.app.data.db.VideoEntity
 import com.simplecalculator.app.data.source.CommentItem
 import com.simplecalculator.app.data.source.VideoDetail
 import com.simplecalculator.app.data.source.VideoSummary
+import com.simplecalculator.app.data.subtitle.SubtitleTrack
 import com.simplecalculator.app.data.source.ph.PhClient
 import com.simplecalculator.app.ui.DurationBadge
 import com.simplecalculator.app.ui.LocalContainer
@@ -103,7 +104,11 @@ fun PlayerScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    fun prefsOf(ctx: android.content.Context) =
+        ctx.getSharedPreferences("calc_state", android.content.Context.MODE_PRIVATE)
+
     var entity by remember { mutableStateOf<VideoEntity?>(null) }
+    var streamUrlForSubs by remember { mutableStateOf<String?>(null) }
     var comments by remember { mutableStateOf<List<CommentItem>>(emptyList()) }
     var related by remember { mutableStateOf<List<VideoSummary>>(emptyList()) }
     var playUri by remember { mutableStateOf<String?>(null) }
@@ -133,6 +138,16 @@ fun PlayerScreen(
     var playing by remember { mutableStateOf(false) }
     var seekHint by remember { mutableStateOf<String?>(null) }
     var seekSide by remember { mutableStateOf<Int?>(null) } // 0 = left, 1 = right
+    // Side-loaded subtitle tracks the site publishes (HLS SUBTITLES renditions).
+    var subtitleTracks by remember { mutableStateOf<List<SubtitleTrack>>(emptyList()) }
+    var subtitleFile by remember { mutableStateOf<java.io.File?>(null) }
+    var liveSubs by remember { mutableStateOf(prefsOf(context).getString("live_subs", "off") ?: "off") }
+    var captionText by remember { mutableStateOf<String?>(null) }
+    var lastSttPosition by remember { mutableStateOf(0L) }
+    var sttState by remember { mutableStateOf("idle") }
+    var modelProgress by remember { mutableStateOf<Int?>(null) }
+    var subtitleChoice by remember { mutableStateOf("off") }
+    var loadingSubs by remember { mutableStateOf(false) }
     var resumeNoticeMs by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(videoKey, reload) {
@@ -197,12 +212,34 @@ fun PlayerScreen(
                 "streams=" + parsed?.streams?.joinToString { it.label + ":" + it.hls } + " picked=" + playUri
             )
         }
+        streamUrlForSubs = playUri
         comments = runCatching {
             container.content.comments(cached.vkey, cached.sourceId, parsed?.commentsUrl, 0)
         }.getOrDefault(emptyList())
         related = container.content.related(cached.vkey, cached.sourceId, parsed?.relatedUrl).take(12)
         loading = false
         container.content.recordView(cached, false)
+    }
+
+    fun buildItem(
+        uri: Uri,
+        subs: java.io.File?,
+        metadata: MediaMetadata? = null
+    ): MediaItem {
+        val builder = MediaItem.Builder().setUri(uri)
+        if (metadata != null) builder.setMediaMetadata(metadata)
+        if (subs != null) {
+            builder.setSubtitleConfigurations(
+                listOf(
+                    MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(subs))
+                        .setMimeType(if (subs.extension == "srt") "application/x-subrip" else "text/vtt")
+                        .setLanguage(subtitleChoice)
+                        .setSelectionFlags(androidx.media3.common.C.SELECTION_FLAG_DEFAULT)
+                        .build()
+                )
+            )
+        }
+        return builder.build()
     }
 
     var player by remember { mutableStateOf<androidx.media3.common.Player?>(null) }
@@ -252,7 +289,7 @@ fun PlayerScreen(
                 .setArtist(entity?.uploaderName.orEmpty())
                 .setArtworkUri(artwork)
                 .build()
-            client.setMediaItem(MediaItem.Builder().setUri(uri).setMediaMetadata(metadata).build())
+            client.setMediaItem(buildItem(Uri.parse(uri), subtitleFile, metadata))
             client.prepare()
             val target = resumeMs
             if (target > 5_000L) {
@@ -283,6 +320,72 @@ fun PlayerScreen(
         }
     }
 
+    androidx.compose.runtime.LaunchedEffect(subtitleChoice, subtitleTracks) {
+        if (subtitleChoice == "off") {
+            subtitleFile = null
+            return@LaunchedEffect
+        }
+        val track = subtitleTracks.firstOrNull { it.language.startsWith(subtitleChoice) }
+            ?: subtitleTracks.firstOrNull()
+            ?: return@LaunchedEffect
+        loadingSubs = true
+        subtitleFile = runCatching {
+            container.subtitles.translated(track, subtitleChoice, null)
+        }.getOrNull()
+        loadingSubs = false
+        // Re-attach the item so the track is picked up, keeping the position.
+        val exo = player
+        if (exo != null && subtitleFile != null) {
+            val resume = exo.currentPosition
+            val uri = exo.currentMediaItem?.localConfiguration?.uri
+            if (uri != null) {
+                resumeMs = resume
+                exo.setMediaItem(buildItem(uri, subtitleFile))
+                exo.prepare()
+                exo.seekTo(resume)
+            }
+        }
+    }
+
+    // Live speech-to-text: tap the audio that is playing and caption it locally.
+    androidx.compose.runtime.DisposableEffect(liveSubs, videoKey) {
+        if (liveSubs == "off") {
+            com.simplecalculator.app.player.PcmBridge.listener = null
+            container.transcriber.stop()
+            captionText = null
+            onDispose { }
+        } else {
+            val targetLang = liveSubs
+            val cachedText = java.util.concurrent.ConcurrentHashMap<Long, String>()
+            container.transcriber.onState = { state ->
+                sttState = state.name.lowercase()
+            }
+            container.transcriber.captions = { cues: List<com.simplecalculator.app.data.stt.Caption> ->
+                val last = cues.lastOrNull()
+                if (last == null) {
+                    captionText = null
+                } else {
+                    val english = last.text
+                    captionText = english
+                    if (targetLang == "tr") {
+                        scope.launch {
+                            val translated = container.translator.translate(english)
+                            if (translated != null) captionText = translated
+                        }
+                    }
+                }
+            }
+            com.simplecalculator.app.player.PcmBridge.listener = { buffer, rate, channels ->
+                container.transcriber.onPcm(buffer, rate, channels)
+            }
+            container.transcriber.start()
+            onDispose {
+                com.simplecalculator.app.player.PcmBridge.listener = null
+                container.transcriber.stop()
+            }
+        }
+    }
+
     val embedded = embedUrl
     if (embedded != null) {
         EmbedPlayerScreen(
@@ -293,6 +396,13 @@ fun PlayerScreen(
         return
     }
 
+    androidx.compose.runtime.LaunchedEffect(streamUrlForSubs) {
+        val url = streamUrlForSubs ?: return@LaunchedEffect
+        subtitleTracks = runCatching {
+            container.subtitles.forStream(url, null)
+        }.getOrDefault(emptyList())
+    }
+
     androidx.compose.runtime.LaunchedEffect(player) {
         while (true) {
             kotlinx.coroutines.delay(500)
@@ -300,6 +410,10 @@ fun PlayerScreen(
             positionMs = exo.currentPosition
             durationMs = exo.duration.coerceAtLeast(0L)
             playing = exo.isPlaying
+            if (kotlin.math.abs(positionMs - lastSttPosition) > 5_000L) {
+                container.transcriber.onSeek(positionMs)
+                lastSttPosition = positionMs
+            }
             if (!autoplayFired && exo.playbackState == Player.STATE_ENDED &&
                 autoplay && related.isNotEmpty()
             ) {
@@ -421,6 +535,21 @@ fun PlayerScreen(
                         }
                     }
                 }
+            }
+            if (captionText != null) {
+                Text(
+                    text = captionText ?: "",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 64.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                )
             }
             if (playbackError != null) {
                 Box(
@@ -666,6 +795,63 @@ fun PlayerScreen(
                         )
                     }
                     HorizontalDivider()
+                    listOf(
+                        "off" to stringResource(R.string.stt_off),
+                        "en" to stringResource(R.string.stt_english),
+                        "tr" to stringResource(R.string.stt_turkish)
+                    ).forEach { (code, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label + if (liveSubs == code) " ✓" else "") },
+                            onClick = {
+                                liveSubs = code
+                                prefsOf(context).edit().putString("live_subs", code).apply()
+                                showMenu = false
+                            }
+                        )
+                    }
+                    if (!container.modelStore.isReady()) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    if (modelProgress != null) {
+                                        stringResource(R.string.stt_downloading, modelProgress ?: 0)
+                                    } else {
+                                        stringResource(R.string.stt_download)
+                                    }
+                                )
+                            },
+                            onClick = {
+                                scope.launch {
+                                    modelProgress = 0
+                                    val ok = container.modelStore.download { modelProgress = it }
+                                    modelProgress = null
+                                    if (ok) {
+                                        liveSubs = "en"
+                                        prefsOf(context).edit().putString("live_subs", "en").apply()
+                                    }
+                                }
+                            }
+                        )
+                    }
+                    HorizontalDivider()
+                    if (subtitleTracks.isNotEmpty()) {
+                        listOf(
+                            "off" to stringResource(R.string.subs_off),
+                            "en" to stringResource(R.string.subs_english),
+                            "tr" to stringResource(R.string.subs_turkish)
+                        ).forEach { (code, label) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(label + if (subtitleChoice == code) " ✓" else "")
+                                },
+                                onClick = {
+                                    subtitleChoice = code
+                                    showMenu = false
+                                }
+                            )
+                        }
+                        HorizontalDivider()
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.player_pip)) },
                         onClick = {

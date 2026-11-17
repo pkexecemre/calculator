@@ -58,6 +58,21 @@ lockout. The app re-locks 90 seconds after it goes to the background.
 - Long-press any card for quick actions: **Save to library** or **Hide from
   feed**. Hidden titles are filtered from every feed/search and can be restored
   from Settings.
+- **Uncensored** and **Subtitled** pills on the JAV tab (and **Subtitled** on
+  Live) filter releases by their tags/slugs, e.g. MissAV's
+  `…-english-subtitle` and `…-uncensored-leak` variants.
+- Japanese titles are machine-translated to the device language, cached on disk
+  and shown above the original; toggle in Settings.
+- The player attaches subtitle tracks that a site publishes through HLS
+  (`EXT-X-MEDIA:TYPE=SUBTITLES`), offers Off / English / Türkçe, and translates
+  the cues for Turkish on demand.
+- **On-device live captions** for videos that ship without subtitles: a tee in
+  the audio sink feeds decoded PCM to whisper.cpp (ggml-tiny.en, 32 MB,
+  downloaded once from Hugging Face), which transcribes 12 s windows while the
+  video plays. Captions appear a few seconds behind speech, never wait for the
+  whole file, and reset on seek. English is native; Turkish is produced by
+  translating each cue with the same cached translator as titles. All inference
+  happens on the phone — no audio leaves the device.
 - Hentai search filters out results whose titles do not match the query, and a
   **Studios / User uploads / VR-VTuber** chip row keeps studio anime separate
   from user-generated or VR slop.

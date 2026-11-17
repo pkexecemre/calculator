@@ -33,6 +33,7 @@
     <string name="home_subtitle">Ranked by the stars you follow</string>
     <string name="home_refresh">Refresh</string>
     <string name="home_continue">Continue watching</string>
+    <string name="release_subtitled">Subtitled</string>
     <string name="jav_all">All releases</string>
     <string name="jav_uncensored">Uncensored</string>
     <string name="flavor_all">All</string>
@@ -73,6 +74,7 @@
     <string name="filter_tags">Tags</string>
     <string name="source_all">All sources</string>
     <string name="source_unreachable">Not reachable from this network:</string>
+    <string name="filter_release_empty">No releases match this filter on the loaded page. Try All releases or refresh.</string>
     <string name="filter_empty_body">Nothing matches those tags on the loaded page. Clear a filter or refresh.</string>
     <string name="gate_title">18+ section</string>
     <string name="gate_body">This part of the app is adult animation and is separated from the rest. Confirm you are 18 or older.</string>
@@ -142,6 +144,14 @@
     <string name="home_series">Series</string>
     <string name="home_trending">Trending now</string>
     <string name="home_featured">Featured today</string>
+    <string name="subs_off">Subtitles: off</string>
+    <string name="subs_english">English subtitles</string>
+    <string name="subs_turkish">Türkçe altyazı</string>
+    <string name="stt_off">Live captions: off</string>
+    <string name="stt_english">Live captions: English</string>
+    <string name="stt_turkish">Live captions: Türkçe</string>
+    <string name="stt_download">Download speech model (32 MB)</string>
+    <string name="stt_downloading">Downloading model… %1$d%%</string>
     <string name="player_pip">Picture in picture</string>
     <string name="player_autoplay_on">Autoplay next: on</string>
     <string name="player_autoplay_off">Autoplay next: off</string>

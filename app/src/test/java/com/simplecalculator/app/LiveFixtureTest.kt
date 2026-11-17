@@ -140,6 +140,24 @@ class LiveFixtureTest {
     }
 
     @Test
+    fun subtitleRenditionsAreParsedFromAMasterPlaylist() {
+        val master = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",URI="subs/en.m3u8"
+            #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Türkçe",LANGUAGE="tr",URI="https://cdn.example/subs/tr.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=842x480,SUBTITLES="subs"
+            a8Op/index.txt
+        """.trimIndent()
+        // The parser is pure: no context or network involved.
+        val tracks = com.simplecalculator.app.data.subtitle.MasterPlaylist
+            .subtitles(master, "https://cdn.example/video/master.m3u8")
+        assertEquals(2, tracks.size)
+        assertEquals("en", tracks[0].language)
+        assertEquals("https://cdn.example/video/subs/en.m3u8", tracks[0].url)
+        assertEquals("tr", tracks[1].language)
+    }
+
+    @Test
     fun uncensoredSlugsAreRecognised() {
         val jav = com.simplecalculator.app.data.source.JavTitles
         assertTrue(jav.isUncensored("MKMP-744 早漏撲滅", "/ja/mkmp-744-uncensored-leak"))

@@ -32,7 +32,8 @@ jobs:
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           [ -x "$SDKMANAGER" ] || SDKMANAGER="$(command -v sdkmanager)"
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools" > /dev/null
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools" \
+            "ndk;27.0.12077973" "cmake;3.22.1" > /dev/null
 
       - name: Point Gradle at the SDK
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties

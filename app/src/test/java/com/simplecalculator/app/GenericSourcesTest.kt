@@ -75,6 +75,25 @@ class GenericSourcesTest {
     }
 
     @Test
+    fun urlLikeTitlesAreHumanised() {
+        val titles = com.simplecalculator.app.data.source.generic.Titles
+        assertEquals(
+            "Busting Asian Milf Dana Vespoli In Son",
+            titles.clean("busting-asian-milf-dana-vespoli-in--son-99002041.html")
+        )
+        assertEquals("Some real title", titles.clean("Some real title"))
+    }
+
+    @Test
+    fun subtitledDetectionDoesNotMatchRandomTitles() {
+        val jav = com.simplecalculator.app.data.source.JavTitles
+        assertTrue(!jav.isSubtitled("15378468wcpeeep 2枚目美人姉さん", "/video/7221237/x"))
+        assertTrue(!jav.isSubtitled("50usd15383968wc It's smooth", "/video/7221233/x"))
+        assertTrue(jav.isSubtitled("ABC-123 english subtitle", "/ja/abc-123"))
+        assertTrue(jav.isSubtitled("作品名", "/ja/dsod-084-chinese-subtitle"))
+    }
+
+    @Test
     fun metadataPrefixesAreStrippedFromTitles() {
         assertEquals(
             "意外挿入、野外自転車上の乱倫",

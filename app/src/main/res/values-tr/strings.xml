@@ -33,6 +33,7 @@
     <string name="home_subtitle">Takip ettiğin yıldızlara göre sıralanır</string>
     <string name="home_refresh">Yenile</string>
     <string name="home_continue">İzlemeye devam et</string>
+    <string name="release_subtitled">Altyazılı</string>
     <string name="jav_all">Tümü</string>
     <string name="jav_uncensored">Sansürsüz</string>
     <string name="flavor_all">Tümü</string>
@@ -73,6 +74,7 @@
     <string name="filter_tags">Etiketler</string>
     <string name="source_all">Tüm kaynaklar</string>
     <string name="source_unreachable">Bu ağdan ulaşılamıyor:</string>
+    <string name="filter_release_empty">Yüklenen sayfada bu filtreye uyan sürüm yok. Tümü’ne dön veya yenile.</string>
     <string name="filter_empty_body">Yüklenen sayfada bu etiketlerle eşleşen yok. Bir filtreyi kaldır ya da yenile.</string>
     <string name="gate_title">18+ bölüm</string>
     <string name="gate_body">Uygulamanın bu bölümü yetişkin animasyonudur ve diğerinden ayrıdır. 18 yaşında veya üstünde olduğunu doğrula.</string>
@@ -142,6 +144,14 @@
     <string name="home_series">Seriler</string>
     <string name="home_trending">Şu an popüler</string>
     <string name="home_featured">Günün seçkisi</string>
+    <string name="subs_off">Altyazı: kapalı</string>
+    <string name="subs_english">İngilizce altyazı</string>
+    <string name="subs_turkish">Türkçe altyazı</string>
+    <string name="stt_off">Canlı altyazı: kapalı</string>
+    <string name="stt_english">Canlı altyazı: İngilizce</string>
+    <string name="stt_turkish">Canlı altyazı: Türkçe</string>
+    <string name="stt_download">Konuşma modelini indir (32 MB)</string>
+    <string name="stt_downloading">Model indiriliyor… %1$d%%</string>
     <string name="player_pip">Pencere içinde pencere</string>
     <string name="player_autoplay_on">Sıradakini oynat: açık</string>
     <string name="player_autoplay_off">Sıradakini oynat: kapalı</string>

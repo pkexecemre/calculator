@@ -4,6 +4,9 @@ import android.content.Context
 import com.simplecalculator.app.core.HiddenStore
 import com.simplecalculator.app.core.PinStore
 import com.simplecalculator.app.core.Translator
+import com.simplecalculator.app.data.stt.LiveTranscriber
+import com.simplecalculator.app.data.stt.ModelStore
+import com.simplecalculator.app.data.subtitle.Subtitles
 import com.simplecalculator.app.data.db.AppDb
 import com.simplecalculator.app.data.download.DownloadsRepository
 import com.simplecalculator.app.data.net.Ipv4Dns
@@ -129,6 +132,12 @@ class Container(context: Context) {
     val hidden: HiddenStore = HiddenStore(appContext)
 
     val translator: Translator = Translator(appContext, http)
+
+    val subtitles: Subtitles = Subtitles(appContext, http, translator)
+
+    val modelStore: ModelStore = ModelStore(appContext, http)
+
+    val transcriber: LiveTranscriber = LiveTranscriber(modelStore)
 
     val sources: SourceRegistry = SourceRegistry(
         buildList {

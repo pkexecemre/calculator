@@ -33,7 +33,27 @@ object Titles {
     )
     private val trailingGrouped = Regex("""[\s·|,-]*\d{1,3}(,\d{3})+$""")
 
+    private val slugLike = Regex("""^[a-z0-9._-]{8,}\.(html?|php|aspx?)$|^[a-z0-9]+(-{2,}|-)[a-z0-9-]{6,}$""")
+
+    /** Some listings hand back the URL path instead of a title. */
+    private fun deslug(raw: String): String {
+        val trimmed = raw.trim()
+        if (!slugLike.matches(trimmed)) return trimmed
+        val words = trimmed
+            .substringBeforeLast('.')
+            .split('-', '_', '.', '/')
+            .filter { it.isNotBlank() }
+            .filterNot { token -> token.length > 5 && token.all { it.isDigit() } }
+            .filterNot { token -> Regex("""[a-f0-9]{8,}""", RegexOption.IGNORE_CASE).matches(token) }
+        if (words.isEmpty()) return trimmed
+        return words.joinToString(" ") { word ->
+            word.replaceFirstChar { it.uppercase() }
+        }
+    }
+
     fun clean(raw: String): String {
+        val input = deslug(raw)
+        if (input != raw) return input
         var text = raw.replace(Regex("\\s+"), " ").trim()
         var guard = 0
         while (guard++ < 6) {

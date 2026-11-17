@@ -41,15 +41,28 @@ class ContentRepository(
     private val hidden: com.simplecalculator.app.core.HiddenStore? = null
 ) {
     /** Drops anything the user dismissed, by key or by series title. */
-    /** "Uncensored only" applies to JAV; other categories ignore the flag. */
-    private fun List<VideoSummary>.filterByCensorship(
+    /**
+     * JAV has real release flavours (uncensored leaks, subtitled cuts) and the
+     * live sites tag subtitled uploads in their titles. Filtering happens after
+     * the merge so every source follows the same rule.
+     */
+    private fun List<VideoSummary>.filterReleases(
         category: Category,
-        uncensoredOnly: Boolean
+        releaseFilter: String?
     ): List<VideoSummary> {
-        if (category != Category.JAV || !uncensoredOnly) return this
-        val filtered = filter { com.simplecalculator.app.data.source.JavTitles.isUncensored(it.title, it.vkey) }
-        // A source may simply not tag leaks; never hand back an empty screen.
-        return filtered.ifEmpty { this }
+        if (releaseFilter == null) return this
+        val filtered = when (releaseFilter) {
+            RELEASE_UNCENSORED -> filter {
+                com.simplecalculator.app.data.source.JavTitles.isUncensored(it.title, it.vkey)
+            }
+            RELEASE_SUBTITLED -> filter {
+                com.simplecalculator.app.data.source.JavTitles.isSubtitled(it.title, it.vkey)
+            }
+            else -> this
+        }
+        // Uncensored leaks are sparsely tagged, so fall back rather than showing
+        // an empty tab. "Subtitled" is a strict promise: no silent substitution.
+        return if (releaseFilter == RELEASE_UNCENSORED) filtered.ifEmpty { this } else filtered
     }
 
     private fun List<VideoSummary>.withoutHidden(): List<VideoSummary> {
@@ -89,7 +102,7 @@ class ContentRepository(
         page: Int = 1,
         tagFilter: String? = null,
         sourceFilter: String? = null,
-        uncensoredOnly: Boolean = false
+        releaseFilter: String? = null
     ): Flow<FeedUpdate> = channelFlow {
         val tagQuery = if (category == Category.HENTAI || category == Category.JAV) {
             tagFilter?.let(Tags::label)
@@ -115,7 +128,7 @@ class ContentRepository(
         }
 
         val raw = if (sourceFilter != null) expandCards(acc.toList()) else acc.toList()
-        val pool = raw.withoutHidden().filterByCensorship(category, uncensoredOnly)
+        val pool = raw.withoutHidden().filterReleases(category, releaseFilter)
         lastFailures = failures.toList().sorted()
         if (pool.isEmpty()) {
             send(FeedUpdate(emptyList(), lastFailures, done = true))
@@ -172,8 +185,8 @@ class ContentRepository(
         page: Int,
         tag: String?,
         source: String?,
-        uncensoredOnly: Boolean = false
-    ) = "${category.name}|$page|${tag.orEmpty()}|${source.orEmpty()}|$uncensoredOnly"
+        releaseFilter: String? = null
+    ) = "${category.name}|$page|${tag.orEmpty()}|${source.orEmpty()}|${releaseFilter.orEmpty()}"
 
     /** Prefetches a page so the next scroll is instant. Best effort only. */
     suspend fun prefetchPage(
@@ -181,12 +194,12 @@ class ContentRepository(
         page: Int,
         tagFilter: String? = null,
         sourceFilter: String? = null,
-        uncensoredOnly: Boolean = false
+        releaseFilter: String? = null
     ) {
-        val key = pageKey(category, page, tagFilter, sourceFilter, uncensoredOnly)
+        val key = pageKey(category, page, tagFilter, sourceFilter, releaseFilter)
         val cached = pageCache[key]
         if (cached != null && System.currentTimeMillis() - cached.first < PAGE_TTL_MS) return
-        runCatching { feed(category, page, tagFilter, sourceFilter, uncensoredOnly) }
+        runCatching { feed(category, page, tagFilter, sourceFilter, releaseFilter) }
     }
 
     suspend fun feed(
@@ -194,13 +207,13 @@ class ContentRepository(
         page: Int = 1,
         tagFilter: String? = null,
         sourceFilter: String? = null,
-        uncensoredOnly: Boolean = false
+        releaseFilter: String? = null
     ): List<VideoSummary> {
-        val cacheKey = pageKey(category, page, tagFilter, sourceFilter, uncensoredOnly)
+        val cacheKey = pageKey(category, page, tagFilter, sourceFilter, releaseFilter)
         pageCache[cacheKey]?.let { (at, items) ->
             if (System.currentTimeMillis() - at < PAGE_TTL_MS) return items
         }
-        val result = feedUncached(category, page, tagFilter, sourceFilter, uncensoredOnly)
+        val result = feedUncached(category, page, tagFilter, sourceFilter, releaseFilter)
         if (result.isNotEmpty()) {
             if (pageCache.size > 24) pageCache.clear()
             pageCache[cacheKey] = System.currentTimeMillis() to result
@@ -213,7 +226,7 @@ class ContentRepository(
         page: Int,
         tagFilter: String?,
         sourceFilter: String?,
-        uncensoredOnly: Boolean
+        releaseFilter: String?
     ): List<VideoSummary> {
         // Tags are a single selection. Search is the only listing mode every
         // registered source implements, so a tag becomes a query instead of a
@@ -233,7 +246,7 @@ class ContentRepository(
         } else {
             fetchAll(active, kind, page, tagQuery)
         }
-        val pool = rawPool.withoutHidden().filterByCensorship(category, uncensoredOnly)
+        val pool = rawPool.withoutHidden().filterReleases(category, releaseFilter)
 
         if (pool.isEmpty()) return emptyList()
         upsertAll(pool)
@@ -638,5 +651,7 @@ class ContentRepository(
         private const val MAX_PARALLEL_SOURCES = 6
         private const val DETAIL_TTL_MS = 10 * 60 * 1000L
         private const val PAGE_TTL_MS = 3 * 60 * 1000L
+        const val RELEASE_UNCENSORED = "uncensored"
+        const val RELEASE_SUBTITLED = "subtitled"
     }
 }
