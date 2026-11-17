@@ -47,6 +47,7 @@ class MissAvSource(private val http: OkHttpClient) : Source {
             "history", "new", "release", "uncensored", "chinese-subtitle", "english-subtitle"
         )
         val CARD_PATH = Regex("""/ja/([a-z0-9]+-[a-z0-9]+)/?$""")
+        val CODE_ONLY = Regex("""(?i)^[a-z]{2,6}-?\d{2,5}$""")
         val MEDIA = Regex("""https?://[^"'\s<>]+\.m3u8[^"'\s<>]*""")
         const val MARKER = "eval(function(p,a,c,k,e,d)"
         const val DIGITS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -96,31 +97,46 @@ class MissAvSource(private val http: OkHttpClient) : Source {
     internal fun parseListing(html: String, base: String = BASES.first()): List<VideoSummary> {
         val doc = Jsoup.parse(html, base)
         val out = LinkedHashMap<String, VideoSummary>()
-        for (link in doc.select("a[href]")) {
+        // Cards are <div class="thumbnail group"> with a cover <a>, a duration
+        // <span> and the real title in a sibling <div class="my-2 …">.
+        for (card in doc.select("div.thumbnail.group, div.thumbnail")) {
+            val link = card.selectFirst("a[href]") ?: continue
             val href = link.attr("abs:href").ifBlank { link.attr("href") }
             val path = runCatching { java.net.URI(href).path.orEmpty() }.getOrDefault("")
             val match = CARD_PATH.find(path) ?: continue
             val slug = match.groupValues[1]
-            if (slug in NAV) continue
-            // Real cards carry a code (nghj-083); navigation slugs do not.
-            if (slug.none { it.isDigit() }) continue
+            if (slug in NAV || slug.none { it.isDigit() }) continue
             if (NAV.any { slug.startsWith(it) }) continue
-            val title = (link.attr("title").ifBlank { link.text() }).trim()
-            if (title.length < 2) continue
-            val card = link.parent() ?: link
+
             val img = card.selectFirst("img")
+            val rawTitle = listOf(
+                card.selectFirst("div.my-2 a")?.text(),
+                card.selectFirst("div.truncate a")?.text(),
+                img?.attr("alt"),
+                link.attr("alt"),
+                link.attr("title")
+            ).firstNotNullOfOrNull { candidate ->
+                candidate?.trim()?.takeIf { it.length >= 4 && !it.matches(CODE_ONLY) }
+            } ?: slug.uppercase()
+            val cleanedTitle = Titles.clean(rawTitle)
+
             val thumb = img?.let { el ->
-                el.attr("abs:data-src").ifBlank { el.attr("abs:src") }
-            }.orEmpty()
+                el.attr("abs:data-src").ifBlank { el.attr("data-src") }
+                    .ifBlank { el.attr("abs:src") }
+            }.orEmpty().takeUnless { it.startsWith("data:") }.orEmpty()
+
+            val duration = card.selectFirst("span.absolute")?.text()
+                ?.let { clock(it) } ?: 0
+
             val key = "/ja/$slug"
             out.putIfAbsent(
                 key,
                 VideoSummary(
                     sourceId = id,
                     vkey = key,
-                    title = title,
+                    title = cleanedTitle,
                     thumb = thumb,
-                    durationSec = 0,
+                    durationSec = duration,
                     views = 0,
                     uploaderSlug = null,
                     uploaderName = null,
@@ -131,6 +147,14 @@ class MissAvSource(private val http: OkHttpClient) : Source {
             )
         }
         return out.values.toList()
+    }
+
+    private fun clock(raw: String): Int {
+        val parts = raw.trim().split(":")
+        if (parts.size < 2) return 0
+        var seconds = 0
+        for (part in parts) seconds = seconds * 60 + (part.toIntOrNull() ?: return 0)
+        return seconds
     }
 
     override suspend fun detail(vkey: String): VideoDetail {

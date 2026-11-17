@@ -53,7 +53,7 @@ class Container(context: Context) {
             val host = original.url.host.lowercase()
             if (original.header("User-Agent") == null) builder.header("User-Agent", PhClient.UA)
             if (original.header("Referer") == null) {
-                builder.header("Referer", refererFor(host))
+                refererFor(host)?.let { builder.header("Referer", it) }
             }
             // Do not leak the age cookie to unrelated third-party hosts.
             if (host.endsWith("pornhub.com") && original.header("Cookie") == null) {
@@ -84,7 +84,7 @@ class Container(context: Context) {
      * Thumbnail CDNs hotlink-protect by Referer: the value has to be the *site*,
      * not the CDN host. Without this map most covers render as empty boxes.
      */
-    private fun refererFor(host: String): String = when {
+    private fun refererFor(host: String): String? = when {
         host.endsWith("pornhub.com") || host.contains("phncdn") -> "https://www.pornhub.com/"
         host.contains("xvideos") || host.contains("xvcdn") || host.contains("cdn77") ->
             "https://www.xvideos.com/"
@@ -95,6 +95,8 @@ class Container(context: Context) {
         host.contains("hentaicloud") -> "https://www.hentaicloud.com/"
         host.contains("iwara") -> "https://www.iwara.tv/"
         host.contains("missav") || host.contains("surrit") -> "https://missav123.com/"
+        // fourhoi serves missav covers and answers 403 to its own host as Referer.
+        host.contains("fourhoi") -> "https://missav123.com/"
         host.contains("aki-h") || host.contains("aki.today") || host.contains("tnmr.org") ->
             "https://aki-h.com/"
         host.contains("hanime1") -> "https://hanime1.me/"
@@ -116,7 +118,7 @@ class Container(context: Context) {
         host.contains("141tube") -> "https://141tube.com/"
         host.contains("avgle") -> "https://avgle.net/"
         host.contains("archive.org") -> "https://archive.org/"
-        else -> "https://" + host + "/"
+        else -> null
     }
 
     val db: AppDb = AppDb.build(appContext)

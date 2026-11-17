@@ -56,7 +56,7 @@ abstract class HtmlLiveSource(protected val http: OkHttpClient) : Source {
         duration: Int = 0,
         tags: List<String> = emptyList()
     ): VideoSummary? {
-        val clean = title.trim()
+        val clean = com.simplecalculator.app.data.source.generic.Titles.clean(title)
         if (vkey.isBlank() || clean.length < 2) return null
         if (!Tags.isAllowed(tags, clean)) return null
         return VideoSummary(

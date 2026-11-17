@@ -53,6 +53,9 @@ data class SiteSpec(
  * Shared HTML adapter for the sites whose public pages expose cards as links and
  * streams as <source>/<video> URLs or plain media links in the page.
  */
+private val CLOCK = Regex("""^\d{1,2}:\d{2}(:\d{2})?$""")
+private val CODE_ONLY = Regex("""(?i)^[a-z]{2,8}-?\d{2,6}$""")
+
 class GenericHtmlSource(
     private val spec: SiteSpec,
     private val http: OkHttpClient
@@ -123,23 +126,38 @@ class GenericHtmlSource(
             if (vkey.isBlank()) continue
 
             val image = card.selectFirst(spec.thumbSelector ?: "img")
-            val thumb = listOf("abs:src", "abs:data-src", "abs:data-original", "abs:data-lazy-src")
-                .firstNotNullOfOrNull { attr -> image?.attr(attr)?.takeIf { it.isNotBlank() } }
-                .orEmpty()
-            val title = listOf(
-                spec.titleSelector?.let { selected ->
-                    card.selectFirst(selected)?.let { element ->
+            val thumb = listOf(
+                "abs:data-src", "abs:data-original", "abs:data-lazy-src",
+                "abs:data-echo", "abs:src"
+            ).firstNotNullOfOrNull { attribute ->
+                image?.attr(attribute)?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
+            }.orEmpty()
+
+            // Several sites put a clock or a bare code in the anchor text and the
+            // real title in a neighbouring heading: take the most informative one.
+            val candidates = listOfNotNull(
+                spec.titleSelector?.let { selector ->
+                    card.selectFirst(selector)?.let { element ->
                         if (spec.titleAttribute == null) {
-                            element.text().ifBlank { null }
+                            element.text()
                         } else {
-                            element.attr(spec.titleAttribute).ifBlank { null }
+                            element.attr(spec.titleAttribute)
                         }
                     }
                 },
+                card.selectFirst("h1, h2, h3, h4, .title, .video-title, .card-title")?.text(),
                 link.attr("title").ifBlank { null },
                 image?.attr("alt")?.ifBlank { null },
                 link.text().ifBlank { null }
-            ).firstNotNullOfOrNull { it }?.trim().orEmpty()
+            ).map { it.replace(Regex("\\s+"), " ").trim() }.filter { it.length >= 2 }
+
+            val title = Titles.clean(
+                candidates.firstOrNull { candidate ->
+                    !CLOCK.matches(candidate) &&
+                        !CODE_ONLY.matches(candidate) &&
+                        !Titles.isMetadataOnly(candidate)
+                } ?: candidates.maxByOrNull { it.length } ?: ""
+            )
             if (title.length < 2) continue
             if (!Tags.isAllowed(spec.tags, title)) continue
 

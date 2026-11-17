@@ -75,6 +75,25 @@ class GenericSourcesTest {
     }
 
     @Test
+    fun metadataPrefixesAreStrippedFromTitles() {
+        assertEquals(
+            "意外挿入、野外自転車上の乱倫",
+            com.simplecalculator.app.data.source.generic.Titles.clean("2K 7:19 意外挿入、野外自転車上の乱倫")
+        )
+        assertEquals(
+            "ライブ03",
+            com.simplecalculator.app.data.source.generic.Titles.clean("HD 26:22 ライブ03 124K 82% 1週間前")
+        )
+        assertEquals(
+            "Some real title",
+            com.simplecalculator.app.data.source.generic.Titles.clean("4K 1:03:47 Some real title")
+        )
+        assertTrue(
+            com.simplecalculator.app.data.source.generic.Titles.isMetadataOnly("1:03:47")
+        )
+    }
+
+    @Test
     fun extraSitesCoverTheMissPipeCatalog() {
         // Generic HTML sites; dedicated adapters cover Pornhub, XVideos, Eporner,
         // Avgle, YouJizz, AnaLdin, hdsex, MissAV, aki-h, OHentai, Iwara(.ai),

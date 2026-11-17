@@ -127,6 +127,19 @@ class LiveFixtureTest {
     }
 
     @Test
+    fun missAvCardsCarryRealTitlesAndCovers() {
+        val source = com.simplecalculator.app.data.source.generic.MissAvSource(http)
+        val items = source.parseListing(fixture("msav_list"))
+        println("msav cards: ${items.size}")
+        items.take(3).forEach { println("  ${it.title.take(50)} | ${it.thumb.take(45)} | ${it.durationSec}") }
+        assertTrue("msav listing empty", items.size >= 10)
+        assertTrue("titles must not be clocks/codes", items.all { it.title.length >= 8 })
+        assertTrue("covers must not be data URIs", items.none { it.thumb.startsWith("data:") })
+        assertTrue("most cards need a cover", items.count { it.thumb.startsWith("http") } >= items.size / 2)
+        assertTrue("durations parsed", items.any { it.durationSec > 60 })
+    }
+
+    @Test
     fun missAvUnpacksTheHlsPlaylist() {
         val source = com.simplecalculator.app.data.source.generic.MissAvSource(http)
         val items = source.parseListing(fixture("msav_list"))
