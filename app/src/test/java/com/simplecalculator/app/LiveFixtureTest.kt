@@ -140,6 +140,15 @@ class LiveFixtureTest {
     }
 
     @Test
+    fun uncensoredSlugsAreRecognised() {
+        val jav = com.simplecalculator.app.data.source.JavTitles
+        assertTrue(jav.isUncensored("MKMP-744 早漏撲滅", "/ja/mkmp-744-uncensored-leak"))
+        assertTrue(jav.isUncensored("無修正 美女羞恥", "/ja/abc-123"))
+        assertTrue(!jav.isUncensored("GNS-167 清掃員", "/ja/gns-167"))
+        assertTrue(jav.isCensored("GNS-167 清掃員", "/ja/gns-167"))
+    }
+
+    @Test
     fun missAvUnpacksTheHlsPlaylist() {
         val source = com.simplecalculator.app.data.source.generic.MissAvSource(http)
         val items = source.parseListing(fixture("msav_list"))

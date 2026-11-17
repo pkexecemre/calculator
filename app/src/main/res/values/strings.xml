@@ -33,6 +33,8 @@
     <string name="home_subtitle">Ranked by the stars you follow</string>
     <string name="home_refresh">Refresh</string>
     <string name="home_continue">Continue watching</string>
+    <string name="jav_all">All releases</string>
+    <string name="jav_uncensored">Uncensored</string>
     <string name="flavor_all">All</string>
     <string name="flavor_studio">Studios</string>
     <string name="flavor_user">User uploads</string>
@@ -125,6 +127,8 @@
     <string name="settings_msg_code">Code updated</string>
     <string name="settings_msg_checking">Checking sources...</string>
     <string name="settings_msg_checked">Sources checked</string>
+    <string name="settings_translate">Translate Japanese titles</string>
+    <string name="settings_translate_body">Titles are machine-translated to English while browsing JAV.</string>
     <string name="settings_sources">Source health</string>
     <string name="settings_sources_body">A source is paused for 30 minutes after 3 failed loads. This list is live.</string>
     <string name="settings_sources_check">Check all sources now</string>

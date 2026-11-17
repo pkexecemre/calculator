@@ -33,6 +33,8 @@
     <string name="home_subtitle">Takip ettiğin yıldızlara göre sıralanır</string>
     <string name="home_refresh">Yenile</string>
     <string name="home_continue">İzlemeye devam et</string>
+    <string name="jav_all">Tümü</string>
+    <string name="jav_uncensored">Sansürsüz</string>
     <string name="flavor_all">Tümü</string>
     <string name="flavor_studio">Stüdyolar</string>
     <string name="flavor_user">Kullanıcı yüklemeleri</string>
@@ -125,6 +127,8 @@
     <string name="settings_msg_code">Kod güncellendi</string>
     <string name="settings_msg_checking">Kaynaklar kontrol ediliyor...</string>
     <string name="settings_msg_checked">Kaynaklar kontrol edildi</string>
+    <string name="settings_translate">Japonca başlıkları çevir</string>
+    <string name="settings_translate_body">JAV gezinirken başlıklar Türkçeye makine çevirisiyle gelir.</string>
     <string name="settings_sources">Kaynak durumu</string>
     <string name="settings_sources_body">3 başarısız yüklemeden sonra bir kaynak 30 dakika duraklatılır. Bu liste canlıdır.</string>
     <string name="settings_sources_check">Tüm kaynakları şimdi kontrol et</string>

@@ -227,14 +227,24 @@ fun VideoCard(
             }
         }
         Spacer(Modifier.height(8.dp))
+        val translated = translatedTitle(video.title, enabled = true)
         Text(
-            text = video.title,
+            text = translated ?: video.title,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onBackground
         )
+        if (translated != null) {
+            Text(
+                text = video.title,
+                style = MaterialTheme.typography.labelSmall,
+                color = TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
         val secondary = modelLabel ?: video.uploaderName
         if (secondary != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -313,8 +323,9 @@ fun SeriesCard(
             }
         }
         Spacer(Modifier.height(6.dp))
+        val translatedGroup = translatedTitle(group.title, enabled = true)
         Text(
-            text = group.title,
+            text = translatedGroup ?: group.title,
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold,
             maxLines = 2,

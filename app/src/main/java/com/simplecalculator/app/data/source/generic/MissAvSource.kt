@@ -46,7 +46,8 @@ class MissAvSource(private val http: OkHttpClient) : Source {
             "actresses", "genres", "makers", "search", "vip", "login", "signup",
             "history", "new", "release", "uncensored", "chinese-subtitle", "english-subtitle"
         )
-        val CARD_PATH = Regex("""/ja/([a-z0-9]+-[a-z0-9]+)/?$""")
+        // Slugs can carry suffixes too: bab-200-uncensored-leak.
+        val CARD_PATH = Regex("""/ja/([a-z0-9]+(?:-[a-z0-9]+)*)/?$""")
         val CODE_ONLY = Regex("""(?i)^[a-z]{2,6}-?\d{2,5}$""")
         val MEDIA = Regex("""https?://[^"'\s<>]+\.m3u8[^"'\s<>]*""")
         const val MARKER = "eval(function(p,a,c,k,e,d)"

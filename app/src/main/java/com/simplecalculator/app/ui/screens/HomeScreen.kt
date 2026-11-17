@@ -86,6 +86,8 @@ fun HomeScreen(
     var seriesMenuFor by remember { mutableStateOf<com.simplecalculator.app.data.source.SeriesGroup?>(null) }
     var tagFilter by remember { mutableStateOf<String?>(null) }
     var flavorFilter by remember { mutableStateOf<HentaiFlavor?>(null) }
+    var uncensoredOnly by remember { mutableStateOf(false) }
+    var lastPrefetched by remember { mutableStateOf<String?>(null) }
     var sourceFilter by remember { mutableStateOf<String?>(null) }
     var failures by remember { mutableStateOf<List<String>>(emptyList()) }
     val gridState = rememberLazyGridState()
@@ -123,8 +125,9 @@ fun HomeScreen(
         }
         error = false
         runCatching {
-            container.content.feedStream(category, target, tagFilter, sourceFilter)
-                .collect { update ->
+            container.content.feedStream(
+                category, target, tagFilter, sourceFilter, uncensoredOnly
+            ).collect { update ->
                     if (reset && update.items.isEmpty() && !update.done) return@collect
                     val mapped = if (category == Category.HENTAI) {
                         val fresh = com.simplecalculator.app.data.source.SeriesStore
@@ -151,7 +154,7 @@ fun HomeScreen(
         loading = false
     }
 
-    LaunchedEffect(category, tagFilter, sourceFilter, flavorFilter) {
+    LaunchedEffect(category, tagFilter, sourceFilter, flavorFilter, uncensoredOnly) {
         page = 1
         load(1, true)
     }
@@ -164,20 +167,23 @@ fun HomeScreen(
             com.simplecalculator.app.ui.ImageWarmup.prefetch(context, thumbs, limit = 12)
         }
         items.firstOrNull()?.let { hero ->
-            withContext(kotlinx.coroutines.Dispatchers.IO) {
-                kotlinx.coroutines.delay(600)
-                container.content.prefetchDetail(hero.key)
+            if (hero.key != lastPrefetched) {
+                lastPrefetched = hero.key
+                withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    kotlinx.coroutines.delay(600)
+                    container.content.prefetchDetail(hero.key)
+                }
             }
         }
     }
 
     val listSize = if (category == Category.HENTAI) groups.size else items.size
     // Warm page two while the user is still reading page one.
-    LaunchedEffect(category, tagFilter, sourceFilter, listSize > 0) {
+    LaunchedEffect(category, tagFilter, sourceFilter, uncensoredOnly, listSize > 0) {
         if (listSize == 0 || loading) return@LaunchedEffect
         kotlinx.coroutines.delay(1_500)
         withContext(kotlinx.coroutines.Dispatchers.IO) {
-            container.content.prefetchPage(category, page + 1, tagFilter, sourceFilter)
+            container.content.prefetchPage(category, page + 1, tagFilter, sourceFilter, uncensoredOnly)
         }
     }
 
@@ -195,7 +201,7 @@ fun HomeScreen(
         loadingMore = true
         val next = page + 1
         runCatching {
-            val more = container.content.feed(category, next, tagFilter, sourceFilter)
+            val more = container.content.feed(category, next, tagFilter, sourceFilter, uncensoredOnly)
             if (more.isNotEmpty()) {
                 if (category == Category.HENTAI) {
                     val fresh = com.simplecalculator.app.data.source.SeriesStore
@@ -217,7 +223,7 @@ fun HomeScreen(
             val next = page
             // Later pages are appended; only the first page resets the list.
             runCatching {
-                val more = container.content.feed(category, next, tagFilter, sourceFilter)
+                val more = container.content.feed(category, next, tagFilter, sourceFilter, uncensoredOnly)
                 if (category == Category.HENTAI) {
                     val fresh = com.simplecalculator.app.data.source.SeriesStore
                         .putAll(com.simplecalculator.app.data.source.SeriesGrouping.group(more))
@@ -289,6 +295,17 @@ fun HomeScreen(
                         tagFilter = null
                     }
                 )
+                if (category == Category.JAV) {
+                    Spacer(Modifier.height(8.dp))
+                    PillChips(
+                        labels = listOf(
+                            stringResource(R.string.jav_all),
+                            stringResource(R.string.jav_uncensored)
+                        ),
+                        selectedIndex = if (uncensoredOnly) 1 else 0,
+                        onSelect = { uncensoredOnly = it == 1 }
+                    )
+                }
                 if (category == Category.HENTAI) {
                     Spacer(Modifier.height(8.dp))
                     PillChips(

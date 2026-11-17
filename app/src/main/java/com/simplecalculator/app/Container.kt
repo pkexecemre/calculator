@@ -3,6 +3,7 @@ package com.simplecalculator.app
 import android.content.Context
 import com.simplecalculator.app.core.HiddenStore
 import com.simplecalculator.app.core.PinStore
+import com.simplecalculator.app.core.Translator
 import com.simplecalculator.app.data.db.AppDb
 import com.simplecalculator.app.data.download.DownloadsRepository
 import com.simplecalculator.app.data.net.Ipv4Dns
@@ -126,6 +127,8 @@ class Container(context: Context) {
     val pinStore: PinStore = PinStore(appContext)
 
     val hidden: HiddenStore = HiddenStore(appContext)
+
+    val translator: Translator = Translator(appContext, http)
 
     val sources: SourceRegistry = SourceRegistry(
         buildList {
