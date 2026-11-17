@@ -823,7 +823,9 @@ fun PlayerScreen(
                             onClick = {
                                 scope.launch {
                                     modelProgress = 0
-                                    val ok = container.modelStore.download { modelProgress = it }
+                                    val ok = container.modelStore.download(
+                                        container.modelStore.selected()
+                                    ) { modelProgress = it }
                                     modelProgress = null
                                     if (ok) {
                                         liveSubs = "en"

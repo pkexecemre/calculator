@@ -131,6 +131,9 @@
     <string name="settings_msg_checked">Sources checked</string>
     <string name="settings_translate">Translate Japanese titles</string>
     <string name="settings_translate_body">Titles are machine-translated to English while browsing JAV.</string>
+    <string name="settings_stt">Speech model</string>
+    <string name="settings_stt_body">Captions use %1$s (%2$d MB). Bigger models are slower but more accurate.</string>
+    <string name="settings_stt_done">Model ready</string>
     <string name="settings_sources">Source health</string>
     <string name="settings_sources_body">A source is paused for 30 minutes after 3 failed loads. This list is live.</string>
     <string name="settings_sources_check">Check all sources now</string>
@@ -152,6 +155,13 @@
     <string name="stt_turkish">Live captions: Türkçe</string>
     <string name="stt_download">Download speech model (32 MB)</string>
     <string name="stt_downloading">Downloading model… %1$d%%</string>
+    <string name="stt_onboarding_title">Caption videos on this device</string>
+    <string name="stt_onboarding_body">Pick a speech model. The base model is already inside the app, so captions work offline and without a download. Bigger models are more accurate and cost more CPU.</string>
+    <string name="stt_download_model">Download %1$d MB model</string>
+    <string name="stt_download_failed">Download failed. Check the connection and try again.</string>
+    <string name="stt_ready">ready</string>
+    <string name="stt_continue">Continue</string>
+    <string name="stt_skip">Skip for now</string>
     <string name="player_pip">Picture in picture</string>
     <string name="player_autoplay_on">Autoplay next: on</string>
     <string name="player_autoplay_off">Autoplay next: off</string>

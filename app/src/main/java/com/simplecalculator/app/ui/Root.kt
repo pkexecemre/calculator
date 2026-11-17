@@ -19,6 +19,10 @@ import com.simplecalculator.app.ui.theme.VaultTheme
 fun Root() {
     val container = LocalContainer.current
     var hasPin by remember { mutableStateOf(container.pinStore.hasPin) }
+    val sttPrefs = remember {
+        container.appContext.getSharedPreferences("stt", android.content.Context.MODE_PRIVATE)
+    }
+    var sttOnboarded by remember { mutableStateOf(sttPrefs.getBoolean("onboarded", false)) }
     // Observe the process-wide session directly so a lock triggered from
     // Settings or on background immediately swaps back to the calculator.
     val unlocked by Session.unlockedState
@@ -28,6 +32,14 @@ fun Root() {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 SetupScreen(
                     onDone = { hasPin = true }
+                )
+            }
+        }
+
+        !sttOnboarded -> CalculatorTheme {
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                com.simplecalculator.app.ui.screens.SttOnboardingScreen(
+                    onDone = { sttOnboarded = true }
                 )
             }
         }

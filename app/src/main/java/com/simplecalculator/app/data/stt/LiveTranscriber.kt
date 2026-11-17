@@ -38,13 +38,16 @@ class LiveTranscriber(
     private var lastCaptionAt = 0L
 
     fun start() {
-        if (!modelStore.isReady()) {
-            onState(State.DOWNLOADING)
-            return
-        }
         onState(State.LOADING)
         scope.launch {
-            val ok = gate.withLock { WhisperBridge.nativeInit(modelStore.modelFile().absolutePath) }
+            val model = modelStore.selected()
+            if (!modelStore.isReady(model) && !modelStore.ensureBundled()) {
+                onState(State.DOWNLOADING)
+                return@launch
+            }
+            val ok = gate.withLock {
+                WhisperBridge.nativeInit(modelStore.fileFor(model).absolutePath)
+            }
             ready.set(ok)
             onState(if (ok) State.LISTENING else State.IDLE)
         }

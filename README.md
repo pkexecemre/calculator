@@ -66,13 +66,15 @@ lockout. The app re-locks 90 seconds after it goes to the background.
 - The player attaches subtitle tracks that a site publishes through HLS
   (`EXT-X-MEDIA:TYPE=SUBTITLES`), offers Off / English / Türkçe, and translates
   the cues for Turkish on demand.
-- **On-device live captions** for videos that ship without subtitles: a tee in
-  the audio sink feeds decoded PCM to whisper.cpp (ggml-tiny.en, 32 MB,
-  downloaded once from Hugging Face), which transcribes 12 s windows while the
-  video plays. Captions appear a few seconds behind speech, never wait for the
-  whole file, and reset on seek. English is native; Turkish is produced by
-  translating each cue with the same cached translator as titles. All inference
-  happens on the phone — no audio leaves the device.
+- **On-device captions** for videos that ship without subtitles: a tee in the
+  audio sink feeds decoded PCM to whisper.cpp, which transcribes 12 s windows
+  while the video plays. Captions never wait for a full download and reset on
+  seek. English is native; Turkish comes from the cached cue translator. All
+  inference happens on the phone — no audio leaves the device.
+- The **base model ships inside the APK** (56 MB), so captions work on a fresh
+  install with no download. First-run offers larger models — Small (181 MB) or
+  Large v3 Turbo (547 MB, newest ggml Whisper) — with a progress bar and a Skip
+  button; the same picker lives in Settings.
 - Hentai search filters out results whose titles do not match the query, and a
   **Studios / User uploads / VR-VTuber** chip row keeps studio anime separate
   from user-generated or VR slop.

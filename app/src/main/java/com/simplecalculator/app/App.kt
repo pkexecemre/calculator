@@ -16,6 +16,10 @@ class App : Application(), ImageLoaderFactory {
         super.onCreate()
         container = Container(this)
         WorkManager.getInstance(this)
+        // Ship-to-disk copy of the bundled speech model, off the main thread.
+        Thread {
+            runCatching { kotlinx.coroutines.runBlocking { container.modelStore.ensureBundled() } }
+        }.start()
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

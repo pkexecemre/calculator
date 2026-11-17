@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -205,6 +206,58 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(28.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+        val sttModel = container.modelStore.selected()
+        var sttProgress by remember { mutableStateOf<Int?>(null) }
+        Text(stringResource(R.string.settings_stt), style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = stringResource(
+                R.string.settings_stt_body,
+                sttModel.label,
+                sttModel.sizeMb
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextMuted
+        )
+        Spacer(Modifier.height(10.dp))
+        androidx.compose.foundation.layout.Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            com.simplecalculator.app.data.stt.ModelCatalog.all.forEach { model ->
+                val active = model.id == sttModel.id
+                val ready = container.modelStore.isReady(model)
+                OutlinedButton(
+                    onClick = {
+                        container.modelStore.select(model)
+                        if (!ready) {
+                            scope.launch {
+                                sttProgress = 0
+                                container.modelStore.download(model) { sttProgress = it }
+                                sttProgress = null
+                                message = context.getString(R.string.settings_stt_done)
+                            }
+                        }
+                    },
+                    enabled = !active || !ready
+                ) {
+                    Text(
+                        if (active && ready) "✓ ${model.label}" else model.label,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+        if (sttProgress != null) {
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { (sttProgress ?: 0) / 100f },
+                modifier = Modifier.fillMaxWidth().height(4.dp)
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
         HorizontalDivider()
         Spacer(Modifier.height(16.dp))
         Text(stringResource(R.string.settings_sources), style = MaterialTheme.typography.titleSmall)
