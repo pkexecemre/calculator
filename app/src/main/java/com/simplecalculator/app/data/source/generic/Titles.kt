@@ -23,6 +23,15 @@ object Titles {
         RegexOption.IGNORE_CASE
     )
     private val trailingClock = Regex("""[\s·|,-]+\d{1,2}:\d{2}(:\d{2})?$""")
+    private val leadingCount = Regex(
+        """^\s*\d+\s+(videos?|views?|photos?|pics?|images?|clips?)\b[\s·|,-]*""",
+        RegexOption.IGNORE_CASE
+    )
+    // Some cards glue the view count straight onto the date: "… 6,819Nov 17, 2026".
+    private val trailingDate = Regex(
+        """[\s·|,-]*(?:[A-Z][a-z]{2,8}\s+\d{1,2},\s*\d{4}|\d{1,2}\s+[A-Z][a-z]{2,8}\s+\d{4})$"""
+    )
+    private val trailingGrouped = Regex("""[\s·|,-]*\d{1,3}(,\d{3})+$""")
 
     fun clean(raw: String): String {
         var text = raw.replace(Regex("\\s+"), " ").trim()
@@ -38,6 +47,11 @@ object Titles {
             text = trailingCount.replace(text, "")
             text = trailingAge.replace(text, "")
             text = trailingClock.replace(text, "")
+            text = leadingCount.replace(text, "")
+            if (text.length > 10) {
+                text = trailingDate.replace(text, "")
+                text = trailingGrouped.replace(text, "")
+            }
             text = text.trim(' ', '·', '|', '-', ',', ':', '　')
             if (text == before) break
         }

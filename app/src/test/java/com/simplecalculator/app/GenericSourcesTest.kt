@@ -91,6 +91,12 @@ class GenericSourcesTest {
         assertTrue(
             com.simplecalculator.app.data.source.generic.Titles.isMetadataOnly("1:03:47")
         )
+        assertEquals(
+            "細身 美乳大学生の手コキフェラ",
+            com.simplecalculator.app.data.source.generic.Titles.clean(
+                "2 videos 細身 美乳大学生の手コキフェラ 6,819Nov 17, 2026"
+            )
+        )
     }
 
     @Test

@@ -64,6 +64,7 @@ import com.simplecalculator.app.ui.SeriesCard
 import com.simplecalculator.app.ui.VideoCard
 import com.simplecalculator.app.ui.theme.TextMuted
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun HomeScreen(
@@ -73,6 +74,7 @@ fun HomeScreen(
     onOpenSeries: (String) -> Unit
 ) {
     val container = LocalContainer.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<VideoSummary>>(emptyList()) }
     var groups by remember { mutableStateOf<List<SeriesGroup>>(emptyList()) }
@@ -154,7 +156,31 @@ fun HomeScreen(
         load(1, true)
     }
 
+    // Artwork for whatever just landed, plus the hero's detail page so the first
+    // Play tap starts immediately.
+    LaunchedEffect(items.firstOrNull()?.key, groups.firstOrNull()?.key) {
+        val thumbs = items.ifEmpty { groups.flatMap { it.videos } }
+        if (thumbs.isNotEmpty()) {
+            com.simplecalculator.app.ui.ImageWarmup.prefetch(context, thumbs, limit = 12)
+        }
+        items.firstOrNull()?.let { hero ->
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                kotlinx.coroutines.delay(600)
+                container.content.prefetchDetail(hero.key)
+            }
+        }
+    }
+
     val listSize = if (category == Category.HENTAI) groups.size else items.size
+    // Warm page two while the user is still reading page one.
+    LaunchedEffect(category, tagFilter, sourceFilter, listSize > 0) {
+        if (listSize == 0 || loading) return@LaunchedEffect
+        kotlinx.coroutines.delay(1_500)
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            container.content.prefetchPage(category, page + 1, tagFilter, sourceFilter)
+        }
+    }
+
     val shouldLoadMore by remember {
         androidx.compose.runtime.derivedStateOf {
             val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0

@@ -16,6 +16,7 @@ import com.simplecalculator.app.data.source.SeriesStore
 import com.simplecalculator.app.data.source.SourceHealth
 import com.simplecalculator.app.data.source.SourceRegistry
 import com.simplecalculator.app.data.source.Tags
+import com.simplecalculator.app.data.source.VideoDetail
 import com.simplecalculator.app.data.source.VideoSummary
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -152,11 +153,47 @@ class ContentRepository(
         }
     }
 
+    private val pageCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<VideoSummary>>>()
+
+    private fun pageKey(category: Category, page: Int, tag: String?, source: String?) =
+        "${category.name}|$page|${tag.orEmpty()}|${source.orEmpty()}"
+
+    /** Prefetches a page so the next scroll is instant. Best effort only. */
+    suspend fun prefetchPage(
+        category: Category,
+        page: Int,
+        tagFilter: String? = null,
+        sourceFilter: String? = null
+    ) {
+        val key = pageKey(category, page, tagFilter, sourceFilter)
+        val cached = pageCache[key]
+        if (cached != null && System.currentTimeMillis() - cached.first < PAGE_TTL_MS) return
+        runCatching { feed(category, page, tagFilter, sourceFilter) }
+    }
+
     suspend fun feed(
         category: Category,
         page: Int = 1,
         tagFilter: String? = null,
         sourceFilter: String? = null
+    ): List<VideoSummary> {
+        val cacheKey = pageKey(category, page, tagFilter, sourceFilter)
+        pageCache[cacheKey]?.let { (at, items) ->
+            if (System.currentTimeMillis() - at < PAGE_TTL_MS) return items
+        }
+        val result = feedUncached(category, page, tagFilter, sourceFilter)
+        if (result.isNotEmpty()) {
+            if (pageCache.size > 24) pageCache.clear()
+            pageCache[cacheKey] = System.currentTimeMillis() to result
+        }
+        return result
+    }
+
+    private suspend fun feedUncached(
+        category: Category,
+        page: Int,
+        tagFilter: String?,
+        sourceFilter: String?
     ): List<VideoSummary> {
         // Tags are a single selection. Search is the only listing mode every
         // registered source implements, so a tag becomes a query instead of a
@@ -445,8 +482,35 @@ class ContentRepository(
 
     suspend fun videoFor(key: String): VideoEntity? = db.videos().byKey(key)
 
-    suspend fun detailFor(video: VideoEntity) =
-        sourceFor(video.key)?.detail(video.vkey) ?: throw IllegalStateException("no source")
+    /**
+     * Detail pages are the slowest request in the app (page fetch + unpacking),
+     * so keep the last handful of them hot. A prefetch while the feed renders
+     * makes "Play" feel instant.
+     */
+    private val detailCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, VideoDetail>>()
+
+    suspend fun detailFor(video: VideoEntity): VideoDetail {
+        val cached = detailCache[video.key]
+        if (cached != null && System.currentTimeMillis() - cached.first < DETAIL_TTL_MS) {
+            return cached.second
+        }
+        val source = sourceFor(video.key) ?: throw IllegalStateException("no source")
+        val detail = source.detail(video.vkey)
+        if (detail.streams.isNotEmpty() || detail.embedUrl != null) {
+            if (detailCache.size > 40) detailCache.clear()
+            detailCache[video.key] = System.currentTimeMillis() to detail
+        }
+        return detail
+    }
+
+    /** Warms the detail cache; failures are irrelevant here. */
+    suspend fun prefetchDetail(key: String) {
+        val video = db.videos().byKey(key) ?: return
+        if (detailCache.containsKey(key)) return
+        runCatching { detailFor(video) }
+    }
+
+
 
     suspend fun applyUploader(key: String, slug: String?, name: String?) {
         if (slug.isNullOrBlank() || name.isNullOrBlank()) return
@@ -552,5 +616,7 @@ class ContentRepository(
     companion object {
         private const val SOURCE_TIMEOUT_MS = 12_000L
         private const val MAX_PARALLEL_SOURCES = 6
+        private const val DETAIL_TTL_MS = 10 * 60 * 1000L
+        private const val PAGE_TTL_MS = 3 * 60 * 1000L
     }
 }
