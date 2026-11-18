@@ -16,5 +16,10 @@
             android:exported="true"
             android:label="STT player debug"
             android:theme="@style/Theme.Calculator" />
+        <activity
+            android:name=".DebugFeedActivity"
+            android:exported="true"
+            android:label="Feed debug"
+            android:theme="@style/Theme.Calculator" />
     </application>
 </manifest>

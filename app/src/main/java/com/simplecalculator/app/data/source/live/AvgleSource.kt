@@ -29,6 +29,9 @@ class AvgleSource(http: OkHttpClient) : HtmlLiveSource(http) {
     override val displayName = "Avgle"
     override val base = "https://avgle.net"
 
+    // Japanese catalogue: available in Filters, but Live defaults to Western.
+    override val defaultInFeed: Boolean = false
+
     override suspend fun listing(
         kind: ListingKind,
         page: Int,

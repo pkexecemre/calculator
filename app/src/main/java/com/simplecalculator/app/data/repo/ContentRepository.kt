@@ -4,8 +4,10 @@ import com.simplecalculator.app.data.db.AppDb
 import com.simplecalculator.app.data.db.EventEntity
 import com.simplecalculator.app.data.db.StarEntity
 import com.simplecalculator.app.data.db.VideoEntity
+import com.simplecalculator.app.data.net.NetworkErrors
 import com.simplecalculator.app.data.rank.Ranker
 import com.simplecalculator.app.data.source.Category
+import com.simplecalculator.app.data.source.ContentFilters
 import com.simplecalculator.app.data.source.hentai.AkiHSource
 import com.simplecalculator.app.data.source.ListingKind
 import com.simplecalculator.app.data.source.Source
@@ -65,6 +67,15 @@ class ContentRepository(
         return if (releaseFilter == RELEASE_UNCENSORED) filtered.ifEmpty { this } else filtered
     }
 
+    /** Category-level content policy applied to every merged feed. */
+    private fun List<VideoSummary>.filterContent(
+        category: Category,
+        sourceFilter: String?
+    ): List<VideoSummary> = ContentFilters.filterFeed(this, category, sourceFilter)
+
+    private fun rankBonus(category: Category): (VideoSummary) -> Double =
+        ContentFilters.rankBonus(category)
+
     private fun List<VideoSummary>.withoutHidden(): List<VideoSummary> {
         val store = hidden ?: return this
         val keys = store.keys()
@@ -111,7 +122,9 @@ class ContentRepository(
         }
         val kind = if (tagQuery != null) ListingKind.SEARCH else ListingKind.TRENDING
         val active = sources.byCategory(category)
-            .filter { sourceFilter == null || it.id == sourceFilter }
+            .filter { source ->
+                if (sourceFilter != null) source.id == sourceFilter else source.defaultInFeed
+            }
         val acc = java.util.Collections.synchronizedList(ArrayList<VideoSummary>())
         val failures = java.util.Collections.synchronizedList(ArrayList<String>())
 
@@ -121,14 +134,22 @@ class ContentRepository(
                     val items = fetchOne(source, kind, page, tagQuery, failures)
                     if (items.isNotEmpty()) {
                         acc.addAll(items)
-                        send(FeedUpdate(acc.toList(), failures.toList(), done = false))
+                        // The first cards stream in before ranking; apply the
+                        // same content policy so nothing unwanted flashes.
+                        val preview = acc.toList()
+                            .withoutHidden()
+                            .filterReleases(category, releaseFilter)
+                            .filterContent(category, sourceFilter)
+                        send(FeedUpdate(preview, failures.toList(), done = false))
                     }
                 }
             }
         }
 
         val raw = if (sourceFilter != null) expandCards(acc.toList()) else acc.toList()
-        val pool = raw.withoutHidden().filterReleases(category, releaseFilter)
+        val pool = raw.withoutHidden()
+            .filterReleases(category, releaseFilter)
+            .filterContent(category, sourceFilter)
         lastFailures = failures.toList().sorted()
         if (pool.isEmpty()) {
             send(FeedUpdate(emptyList(), lastFailures, done = true))
@@ -140,7 +161,8 @@ class ContentRepository(
             candidates = pool,
             followedSlugs = followed,
             affinity = affinity(),
-            seen = db.events().recentVideos().toSet()
+            seen = db.events().recentVideos().toSet(),
+            bonus = rankBonus(category)
         )
         val isStarred: (VideoSummary) -> Boolean =
             { it.uploaderSlug != null && it.uploaderSlug in followed }
@@ -172,7 +194,7 @@ class ContentRepository(
                 throw e
             }
         } catch (e: Exception) {
-            health.recordFailure(source.id, e.message)
+            health.recordFailure(source.id, NetworkErrors.describe(e))
             failures.add(source.displayName)
             emptyList()
         }
@@ -238,7 +260,9 @@ class ContentRepository(
         }
         val kind = if (tagQuery != null) ListingKind.SEARCH else ListingKind.TRENDING
         val active = sources.byCategory(category)
-            .filter { sourceFilter == null || it.id == sourceFilter }
+            .filter { source ->
+                if (sourceFilter != null) source.id == sourceFilter else source.defaultInFeed
+            }
         // With a single source selected the pool is small enough to expand
         // series cards right away, so the badge shows the real episode count.
         val rawPool = if (sourceFilter != null) {
@@ -246,7 +270,9 @@ class ContentRepository(
         } else {
             fetchAll(active, kind, page, tagQuery)
         }
-        val pool = rawPool.withoutHidden().filterReleases(category, releaseFilter)
+        val pool = rawPool.withoutHidden()
+            .filterReleases(category, releaseFilter)
+            .filterContent(category, sourceFilter)
 
         if (pool.isEmpty()) return emptyList()
         upsertAll(pool)
@@ -255,7 +281,8 @@ class ContentRepository(
             candidates = pool,
             followedSlugs = followed,
             affinity = affinity(),
-            seen = db.events().recentVideos().toSet()
+            seen = db.events().recentVideos().toSet(),
+            bonus = rankBonus(category)
         )
         val isStarred: (VideoSummary) -> Boolean =
             { it.uploaderSlug != null && it.uploaderSlug in followed }
@@ -282,7 +309,7 @@ class ContentRepository(
                     tags = row.tags.split(',').filter { it.isNotBlank() },
                     flavor = com.simplecalculator.app.data.source.HentaiFlavor.from(row.title)
                 )
-            }
+            }.filterContent(category, null)
         }.onFailure { android.util.Log.w("ContentRepo", "cachedFeed failed", it) }
             .also { result -> android.util.Log.e("ContentRepo", "cachedFeed(${category.name}) -> ${result.getOrNull()?.size ?: 0}") }
             .getOrDefault(emptyList())

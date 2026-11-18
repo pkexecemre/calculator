@@ -83,6 +83,12 @@ interface Source {
     val playerMode: PlayerMode
     val supportsStars: Boolean
 
+    /**
+     * Whether the source belongs in the default merged feed. Sources that are
+     * off by default stay reachable through the Filters sheet.
+     */
+    val defaultInFeed: Boolean get() = true
+
     suspend fun listing(kind: ListingKind, page: Int, query: String?, slug: String?): List<VideoSummary>
 
     suspend fun detail(vkey: String): VideoDetail

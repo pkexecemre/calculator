@@ -61,6 +61,11 @@ lockout. The app re-locks 90 seconds after it goes to the background.
 - **Uncensored** and **Subtitled** pills on the JAV tab (and **Subtitled** on
   Live) filter releases by their tags/slugs, e.g. MissAV's
   `…-english-subtitle` and `…-uncensored-leak` variants.
+- **Live is Western by default**: 141tube and Avgle are selectable in Filters
+  but are not mixed into the default Live feed, and CJK-titled cards are
+  dropped. **JAV trends ordinary studio releases**: hidden-camera, voyeur and
+  toilet titles are filtered out, releases with a product code and the studio
+  sources rank higher, and TokyoMotion is opt-in through Filters.
 - Japanese titles are machine-translated to the device language, cached on disk
   and shown above the original; toggle in Settings.
 - The player attaches subtitle tracks that a site publishes through HLS
@@ -147,6 +152,10 @@ English and Japanese samples through the real caption pipeline, and prints the
 inference time and RTF for each window — useful for checking a phone's
 real-world caption speed.
 
+Debug builds trust **user-installed CA certificates** as well as the system
+store, so TLS interception by a VPN/ad-blocker does not break the sources; a
+release build keeps the normal system-only trust store.
+
 ## Tests
 
 `LIVE_PROBE=1 ./gradlew :app:testDebugUnitTest --tests '*LiveProbeTest'` walks
@@ -172,7 +181,7 @@ lulustream are followed one level and unpacked the same way, which made JAV-NONI
 and JAV-FUN native as well — these hosts serve a JS-only page when the request
 carries a full browser `Accept` header, so embed fetches stay minimal.
 
-`./gradlew :app:testDebugUnitTest` runs **92 tests**: saved real/archived pages
+`./gradlew :app:testDebugUnitTest` runs **101 tests**: saved real/archived pages
 for all 23 sources (`LiveFixtureTest`), synthetic stream-extraction cases, the
 original parser fixtures, source-health behavior, calculator expressions and
 the feed mixer. A site change now fails a test instead of the UI.

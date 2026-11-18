@@ -46,7 +46,9 @@ data class SiteSpec(
     val tags: List<String> = emptyList(),
     val flavor: HentaiFlavor? = null,
     val forceEmbed: Boolean = false,
-    val mediaRegex: Regex = DEFAULT_MEDIA_REGEX
+    val mediaRegex: Regex = DEFAULT_MEDIA_REGEX,
+    /** Off by default in the merged feed; still selectable in Filters. */
+    val defaultInFeed: Boolean = true
 )
 
 /**
@@ -78,6 +80,7 @@ class GenericHtmlSource(
     override val category: Category get() = spec.category
     override val playerMode: PlayerMode = PlayerMode.NATIVE
     override val supportsStars: Boolean = false
+    override val defaultInFeed: Boolean get() = spec.defaultInFeed
 
     private suspend fun fetch(path: String): String = withContext(Dispatchers.IO) {
         val url = if (path.startsWith("http")) path else spec.base + path
@@ -433,7 +436,8 @@ object ExtraSites {
             base = "https://www.tokyomotion.net",
             trendingPath = { if (it <= 1) "/videos" else "/videos?page=$it" },
             searchPath = { q, _ -> "/search?search_query=${enc(q)}&search_type=videos" },
-            cardSelector = "a.thumb-popu, a[href*=/video/]"
+            cardSelector = "a.thumb-popu, a[href*=/video/]",
+            defaultInFeed = false
         ),
         SiteSpec(
             id = "mrd", displayName = "MRDOUGA", category = Category.JAV,
@@ -480,7 +484,8 @@ object ExtraSites {
             base = "https://141tube.com",
             trendingPath = { if (it <= 1) "/" else "/?page=$it" },
             searchPath = { q, page -> "/search/videos?search_query=${enc(q)}" + if (page > 1) "&page=$page" else "" },
-            cardSelector = "a[href*=/video/]"
+            cardSelector = "a[href*=/video/]",
+            defaultInFeed = false
         ),
 
         SiteSpec(

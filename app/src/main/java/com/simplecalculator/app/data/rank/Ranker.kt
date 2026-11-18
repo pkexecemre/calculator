@@ -15,7 +15,8 @@ class Ranker {
         candidates: List<VideoSummary>,
         followedSlugs: Set<String>,
         affinity: Map<String, Int>,
-        seen: Set<String>
+        seen: Set<String>,
+        bonus: (VideoSummary) -> Double = { 0.0 }
     ): List<VideoSummary> {
         val distinct = candidates.distinctBy { it.key }
         val scored = distinct.mapIndexed { index, video ->
@@ -28,6 +29,7 @@ class Ranker {
             }
             if (video.key in seen) score -= 1.4
             if (video.viewedBoost()) score += 0.15
+            score += bonus(video)
             video to (score + Random.nextDouble(0.0, 0.45))
         }
         val ordered = scored.sortedByDescending { it.second }.map { it.first }
