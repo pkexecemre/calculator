@@ -1,34 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      These activities bypass the vault PIN and are for local debugging only.
+      Exported only when built with -PdebugToolsExported=true; the default and
+      every CI/release build keep them unexported so another app cannot open
+      the feed around the lock screen.
+    -->
     <application>
         <activity
             android:name=".DebugSttActivity"
-            android:exported="true"
+            android:exported="${debugToolsExported}"
             android:label="STT debug"
             android:theme="@style/Theme.Calculator" />
         <activity
             android:name=".DebugTeeActivity"
-            android:exported="true"
+            android:exported="${debugToolsExported}"
             android:label="STT tee debug"
             android:theme="@style/Theme.Calculator" />
         <activity
             android:name=".DebugPlayerActivity"
-            android:exported="true"
+            android:exported="${debugToolsExported}"
             android:label="STT player debug"
             android:theme="@style/Theme.Calculator" />
         <activity
             android:name=".DebugFeedActivity"
-            android:exported="true"
+            android:exported="${debugToolsExported}"
             android:label="Feed debug"
             android:theme="@style/Theme.Calculator" />
         <activity
             android:name=".DebugHomeActivity"
-            android:exported="true"
+            android:exported="${debugToolsExported}"
             android:label="Home debug"
             android:theme="@style/Theme.Calculator" />
         <activity
             android:name=".DebugSearchActivity"
-            android:exported="true"
+            android:exported="${debugToolsExported}"
             android:label="Search debug"
             android:theme="@style/Theme.Calculator" />
     </application>

@@ -22,8 +22,10 @@ if ! "${ADB[@]}" get-state >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Building debug APK..."
-./gradlew :app:assembleDebug --console=plain >/dev/null
+echo "Building debug APK with exported debug tools..."
+# The harness activities are normally unexported; this local-only build opens
+# them so adb can launch the benchmark.
+./gradlew :app:assembleDebug -PdebugToolsExported=true --console=plain >/dev/null
 
 echo "Installing..."
 "${ADB[@]}" install -r app/build/outputs/apk/debug/app-debug.apk >/dev/null

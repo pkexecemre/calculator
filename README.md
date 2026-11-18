@@ -150,10 +150,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 A Gradle 8.14.3 wrapper is included, so `./gradlew` works without a system Gradle.
 
-`tools/bench_stt.sh [adb-serial]` installs the debug APK, feeds the bundled
-English and Japanese samples through the real caption pipeline, and prints the
-inference time and RTF for each window — useful for checking a phone's
-real-world caption speed.
+`tools/bench_stt.sh [adb-serial]` builds a local debug APK with
+`-PdebugToolsExported=true`, feeds the bundled English and Japanese samples
+through the real caption pipeline, and prints the inference time and RTF for
+each window — useful for checking a phone's real-world caption speed. Normal
+builds keep those PIN-bypassing activities unexported.
 
 Debug builds trust **user-installed CA certificates** as well as the system
 store, so TLS interception by a VPN/ad-blocker does not break the sources; a

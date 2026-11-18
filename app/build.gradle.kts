@@ -37,6 +37,11 @@ android {
         versionCode = buildVersionCode
         versionName = buildVersionName
         resourceConfigurations += listOf("en", "tr")
+        // Debug-only harness activities bypass the vault PIN. They are exported
+        // only in explicit local test builds; CI/release builds keep them
+        // unexported so another app cannot open the feed around the lock.
+        manifestPlaceholders["debugToolsExported"] =
+            (findProperty("debugToolsExported") as String?) ?: "false"
     }
 
     buildFeatures {
