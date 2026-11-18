@@ -15,7 +15,14 @@ data class SttModel(
     val sizeMb: Int,
     val note: String,
     val englishOnly: Boolean = false,
-    val bundled: Boolean = false
+    val bundled: Boolean = false,
+    /**
+     * Whether this model is realistic for live captions. Large Turbo needs much
+     * more time per window than the audio it covers on phone CPUs; the live
+     * pipeline deliberately keeps the bundled Base in that case instead of
+     * leaving the viewer staring at "listening".
+     */
+    val liveFriendly: Boolean = true
 )
 
 object ModelCatalog {
@@ -44,7 +51,8 @@ object ModelCatalog {
             shortLabel = "Large Turbo",
             file = "ggml-large-v3-turbo-q5_0.bin",
             sizeMb = 547,
-            note = "Most accurate. Heavy: live captions fall back to Base if it cannot keep up."
+            note = "Most accurate. Too heavy for live captions: Base is used while watching.",
+            liveFriendly = false
         )
     )
 

@@ -5,6 +5,7 @@ import com.simplecalculator.app.data.rank.Ranker
 import com.simplecalculator.app.data.source.Category
 import com.simplecalculator.app.data.source.ContentFilters
 import com.simplecalculator.app.data.source.VideoSummary
+import com.simplecalculator.app.data.stt.ModelCatalog
 import com.simplecalculator.app.data.source.generic.ExtraSites
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -112,6 +113,13 @@ class ContentPolicyTest {
             bonus = { v -> if (v.sourceId == "msav") 10.0 else 0.0 }
         )
         assertEquals("studio", ranked.first().vkey)
+    }
+
+    @Test
+    fun hugeModelIsNotMarkedLiveFriendly() {
+        assertFalse(ModelCatalog.byId("large").liveFriendly)
+        assertTrue(ModelCatalog.byId("base").liveFriendly)
+        assertTrue(ModelCatalog.byId("small").liveFriendly)
     }
 
     @Test

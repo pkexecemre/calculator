@@ -63,7 +63,9 @@ class DebugTeeActivity : Activity() {
         val container = (application as App).container
         previousModelId = container.modelStore.selected().id
         container.modelStore.select(ModelCatalog.byId("base"))
+        val audioAsset = intent.getStringExtra("audio") ?: "jfk.wav"
         append("model=base previous=" + previousModelId)
+        append("audio=" + audioAsset)
 
         val stt = LiveTranscriber(container.modelStore)
         transcriber = stt
@@ -90,7 +92,7 @@ class DebugTeeActivity : Activity() {
                 }
             }
         })
-        player.setMediaItem(MediaItem.fromUri(Uri.parse("asset:///jfk.wav")))
+        player.setMediaItem(MediaItem.fromUri(Uri.parse("asset:///" + audioAsset)))
         player.prepare()
         player.playWhenReady = true
 

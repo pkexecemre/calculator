@@ -87,7 +87,9 @@ lockout. The app re-locks 90 seconds after it goes to the background.
 - The **Base model ships inside the APK** (57 MB), so captions work on a fresh
   install with no download. First-run offers larger models — Small (181 MB) or
   Large v3 Turbo (547 MB) — with a progress bar and a Skip button; the same
-  picker lives in Settings.
+  picker lives in Settings. Large Turbo is too slow for live captions on phone
+  CPUs, so the live pipeline deliberately keeps the bundled Base model while
+  watching.
 - Hentai search filters out results whose titles do not match the query, and a
   **Studios / User uploads / VR-VTuber** chip row keeps studio anime separate
   from user-generated or VR slop.
@@ -185,7 +187,7 @@ lulustream are followed one level and unpacked the same way, which made JAV-NONI
 and JAV-FUN native as well — these hosts serve a JS-only page when the request
 carries a full browser `Accept` header, so embed fetches stay minimal.
 
-`./gradlew :app:testDebugUnitTest` runs **102 tests**: saved real/archived pages
+`./gradlew :app:testDebugUnitTest` runs **103 tests**: saved real/archived pages
 for all 23 sources (`LiveFixtureTest`), synthetic stream-extraction cases, the
 original parser fixtures, source-health behavior, calculator expressions and
 the feed mixer. A site change now fails a test instead of the UI.

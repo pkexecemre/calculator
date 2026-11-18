@@ -269,8 +269,15 @@ class LiveTranscriber(
     private suspend fun loadModel(): SttModel? {
         modelStore.ensureBundled()
         val requested = modelStore.selected()
-        init(requested)?.let { return it }
         val bundled = ModelCatalog.all.firstOrNull { it.bundled }
+        // A selected model that cannot plausibly keep up must not make the
+        // first caption take a minute. Base is always ready and fast enough for
+        // the target phone; the setting still applies to smaller models.
+        if (!requested.liveFriendly && bundled != null) {
+            Log.i(TAG, "selected model ${requested.id} is not live-friendly; using ${bundled.id}")
+            init(bundled)?.let { return it }
+        }
+        init(requested)?.let { return it }
         if (bundled != null && bundled.id != requested.id) {
             Log.w(TAG, "falling back to bundled model")
             return init(bundled)
@@ -445,8 +452,10 @@ class LiveTranscriber(
         private const val WINDOW_MS = 4_000L
         private const val OVERLAP_MS = 1_000L
         private const val SILENCE_RMS = 0.002f
-        private const val STALE_WINDOW_MS = 15_000L
-        private const val MAX_RESULT_LATENCY_MS = 12_000L
+        // A slow phone should still show a late caption instead of dropping
+        // every result; the queue and age checks keep the backlog bounded.
+        private const val STALE_WINDOW_MS = 25_000L
+        private const val MAX_RESULT_LATENCY_MS = 20_000L
         private val THREADS = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
     }
 }
