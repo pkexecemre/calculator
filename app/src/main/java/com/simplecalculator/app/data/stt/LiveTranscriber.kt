@@ -58,6 +58,7 @@ class LiveTranscriber(
     @Volatile private var freshSession = true
     @Volatile private var lastPositionMs = 0L
     @Volatile private var languageHint: String? = null
+    @Volatile private var requestedModelId: String? = null
     @Volatile private var loaded: SttModel? = null
     @Volatile private var sawPcm = false
     @Volatile private var sessionPcm = false
@@ -73,8 +74,9 @@ class LiveTranscriber(
      * English is transcribed; other languages are translated to English.
      * Null lets Whisper detect the language, which is slower.
      */
-    fun start(languageHint: String? = null) {
+    fun start(languageHint: String? = null, modelId: String? = null) {
         this.languageHint = languageHint?.trim()?.lowercase()?.takeIf { it != "auto" && it.isNotEmpty() }
+        this.requestedModelId = modelId
         flushJob?.cancel()
         watchdog?.cancel()
         watchdog = null
@@ -134,6 +136,9 @@ class LiveTranscriber(
             }
         }
     }
+
+    /** True once the current session has received at least one PCM buffer. */
+    fun hasPcm(): Boolean = sessionPcm
 
     fun stop() {
         flushJob?.cancel()
@@ -281,7 +286,9 @@ class LiveTranscriber(
 
     private suspend fun loadModel(): SttModel? {
         modelStore.ensureBundled()
-        val requested = modelStore.selected()
+        val requested = requestedModelId
+            ?.let { ModelCatalog.byId(it) }
+            ?: modelStore.selected()
         val bundled = ModelCatalog.all.firstOrNull { it.bundled }
         // A selected model that cannot plausibly keep up must not make the
         // first caption take a minute. Base is always ready and fast enough for

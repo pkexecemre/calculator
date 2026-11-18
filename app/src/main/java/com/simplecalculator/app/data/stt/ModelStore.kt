@@ -39,28 +39,33 @@ class ModelStore(context: Context, private val http: OkHttpClient) {
         fileGate.withLock {
             // Older builds bundled an English-only base; do not keep 56 MB around.
             File(dir, "ggml-base.en-q5_1.bin").delete()
-            val model = ModelCatalog.all.firstOrNull { it.bundled } ?: return@withLock false
-            val target = fileFor(model)
-            if (target.exists() && target.length() > MIN_BYTES) return@withLock true
-            val temp = File(dir, model.file + ".copying")
-            temp.delete()
-            val ok = runCatching {
-                assets.open("models/${model.file}").use { input ->
-                    temp.outputStream().use { output -> input.copyTo(output, 512 * 1024) }
-                }
-                if (temp.length() <= MIN_BYTES) {
-                    temp.delete()
-                    false
-                } else {
-                    target.delete()
-                    temp.renameTo(target)
-                }
-            }.getOrDefault(false)
-            if (!ok) {
+            val bundled = ModelCatalog.all.filter { it.bundled }
+            if (bundled.isEmpty()) return@withLock false
+            var allReady = true
+            for (model in bundled) {
+                val target = fileFor(model)
+                if (target.exists() && target.length() > MIN_BYTES) continue
+                val temp = File(dir, model.file + ".copying")
                 temp.delete()
-                target.delete()
+                val ok = runCatching {
+                    assets.open("models/${model.file}").use { input ->
+                        temp.outputStream().use { output -> input.copyTo(output, 512 * 1024) }
+                    }
+                    if (temp.length() <= MIN_BYTES) {
+                        temp.delete()
+                        false
+                    } else {
+                        target.delete()
+                        temp.renameTo(target)
+                    }
+                }.getOrDefault(false)
+                if (!ok) {
+                    temp.delete()
+                    target.delete()
+                    allReady = false
+                }
             }
-            ok
+            allReady
         }
     }
 

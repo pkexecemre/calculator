@@ -35,9 +35,10 @@ class DebugPlayerActivity : ComponentActivity() {
         prefs.edit().putString("live_subs", live).apply()
 
         val key = KEY
-        val file = File(filesDir, "debug-caption.wav")
+        val audioAsset = intent.getStringExtra("audio") ?: "jfk.wav"
+        val file = File(filesDir, "debug-caption-" + audioAsset)
         if (!file.exists() || file.length() < 1000) {
-            assets.open("jfk.wav").use { input ->
+            assets.open(audioAsset).use { input ->
                 file.outputStream().use { output -> input.copyTo(output) }
             }
         }

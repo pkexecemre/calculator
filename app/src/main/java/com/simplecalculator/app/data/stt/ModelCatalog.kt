@@ -38,6 +38,15 @@ object ModelCatalog {
             bundled = true
         ),
         SttModel(
+            id = "tiny",
+            label = "Tiny (fast fallback)",
+            shortLabel = "Tiny",
+            file = "ggml-tiny-q5_1.bin",
+            sizeMb = 31,
+            note = "Ships inside the app. Used automatically only if Base cannot keep up; fastest, but less accurate.",
+            bundled = true
+        ),
+        SttModel(
             id = "small",
             label = "Small (multilingual)",
             shortLabel = "Small",

@@ -87,11 +87,13 @@ lockout. The app re-locks 90 seconds after it goes to the background.
   The bundled model is multilingual: English speech is transcribed and Japanese
   (JAV/hentai) is translated to English, while Turkish goes through the cached
   translator. All inference happens on the phone — no audio leaves the device.
-- The **Base model ships inside the APK** (57 MB), so captions work on a fresh
-  install with no download and no setup screen. Settings offers optional larger
-  models — Small (181 MB) or Large v3 Turbo (547 MB). Large Turbo is too slow
-  for live captions on phone CPUs, so the live pipeline deliberately keeps the
-  bundled Base model while watching.
+- The **Base model (57 MB) and a Tiny fallback (31 MB) ship inside the APK**, so
+  captions work on a fresh install with no download and no setup screen. If no
+  cue lands while a video is playing, the caption watchdog silently restarts
+  with Base and then Tiny; Tiny is also the automatic speed fallback. Settings
+  offers optional larger models — Small (181 MB) or Large v3 Turbo (547 MB).
+  Large Turbo is too slow for live captions on phone CPUs, so the live pipeline
+  deliberately keeps the bundled Base model while watching.
 - Hentai search filters out results whose titles do not match the query, and a
   **Studios / User uploads / VR-VTuber** chip row keeps studio anime separate
   from user-generated or VR slop.

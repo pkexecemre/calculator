@@ -126,6 +126,8 @@ class ContentPolicyTest {
     fun hugeModelIsNotMarkedLiveFriendly() {
         assertFalse(ModelCatalog.byId("large").liveFriendly)
         assertTrue(ModelCatalog.byId("base").liveFriendly)
+        assertTrue(ModelCatalog.byId("tiny").liveFriendly)
+        assertTrue(ModelCatalog.byId("tiny").bundled)
         assertTrue(ModelCatalog.byId("small").liveFriendly)
     }
 

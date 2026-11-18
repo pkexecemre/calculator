@@ -91,6 +91,7 @@ import com.simplecalculator.app.ui.Thumb
 import com.simplecalculator.app.ui.theme.Surface2
 import com.simplecalculator.app.ui.theme.TextMuted
 import kotlinx.coroutines.async
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -152,6 +153,7 @@ fun PlayerScreen(
     var liveSubs by remember { mutableStateOf(prefsOf(context).getString("live_subs", "off") ?: "off") }
     var captionText by remember { mutableStateOf<String?>(null) }
     var captionSerial by remember { mutableStateOf(0) }
+    var lastCueAt by remember { mutableStateOf(0L) }
     val positionRef = remember { java.util.concurrent.atomic.AtomicLong(0L) }
     var subtitleChoice by remember { mutableStateOf("off") }
     var loadingSubs by remember { mutableStateOf(false) }
@@ -394,6 +396,7 @@ fun PlayerScreen(
     androidx.compose.runtime.DisposableEffect(liveSubs, videoKey, entity?.category) {
         captionText = null
         captionSerial += 1
+        lastCueAt = 0L
         if (liveSubs == "off") {
             com.simplecalculator.app.player.PcmBridge.listener = null
             container.transcriber.captions = {}
@@ -414,6 +417,7 @@ fun PlayerScreen(
                 // not just the last cue, or most of the speech is silently lost.
                 val text = cues.joinToString(" ") { it.text }.trim()
                 scope.launch {
+                    lastCueAt = android.os.SystemClock.elapsedRealtime()
                     captionSerial += 1
                     if (text.isEmpty()) {
                         captionText = null
@@ -452,6 +456,43 @@ fun PlayerScreen(
                 container.transcriber.onState = {}
                 container.transcriber.stop()
             }
+        }
+    }
+
+    // Caption self-healing: if playback is running but no cue has landed for a
+    // while, retry the transcriber with Base and then the bundled Tiny model.
+    // Nothing is shown to the viewer; it either recovers or stays silent.
+    androidx.compose.runtime.LaunchedEffect(liveSubs, videoKey, entity?.category) {
+        if (liveSubs == "off") return@LaunchedEffect
+        val languageHint = when (entity?.category?.uppercase()) {
+            "JAV", "HENTAI" -> "ja"
+            else -> "en"
+        }
+        var startedAt = android.os.SystemClock.elapsedRealtime()
+        var attempts = 0
+        while (isActive) {
+            kotlinx.coroutines.delay(2_000L)
+            val now = android.os.SystemClock.elapsedRealtime()
+            val current = player
+            if (current == null || !current.isPlaying) {
+                startedAt = now
+                continue
+            }
+            val lastActivity = maxOf(startedAt, lastCueAt)
+            if (now - lastActivity < 12_000L) continue
+            if (attempts >= 2) break
+            val model = if (attempts == 0) "base" else "tiny"
+            if (attempts == 0 && !container.transcriber.hasPcm()) {
+                // No audio reached the tap: nudge the player to rebuild its
+                // audio path, then retry. The position is unchanged.
+                android.util.Log.i("CaptionHeal", "no audio tap; re-seeking to reinitialise audio")
+                current.seekTo(current.currentPosition)
+            }
+            attempts++
+            android.util.Log.i("CaptionHeal", "retrying with $model after ${now - lastActivity}ms without a cue")
+            container.transcriber.stop()
+            container.transcriber.start(languageHint, model)
+            startedAt = now
         }
     }
 
