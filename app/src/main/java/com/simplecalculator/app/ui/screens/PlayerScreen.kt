@@ -92,6 +92,10 @@ import com.simplecalculator.app.ui.theme.Surface2
 import com.simplecalculator.app.ui.theme.TextMuted
 import kotlinx.coroutines.launch
 
+/** How long a caption stays after it lands; longer lines need longer to read. */
+private fun captionHoldMs(text: String): Long =
+    (2_500L + text.length * 45L).coerceAtMost(7_000L)
+
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun PlayerScreen(
@@ -143,8 +147,9 @@ fun PlayerScreen(
     var subtitleFile by remember { mutableStateOf<java.io.File?>(null) }
     var liveSubs by remember { mutableStateOf(prefsOf(context).getString("live_subs", "off") ?: "off") }
     var captionText by remember { mutableStateOf<String?>(null) }
-    var lastSttPosition by remember { mutableStateOf(0L) }
+    var captionSerial by remember { mutableStateOf(0) }
     var sttState by remember { mutableStateOf("idle") }
+    val positionRef = remember { java.util.concurrent.atomic.AtomicLong(0L) }
     var modelProgress by remember { mutableStateOf<Int?>(null) }
     var subtitleChoice by remember { mutableStateOf("off") }
     var loadingSubs by remember { mutableStateOf(false) }
@@ -281,6 +286,27 @@ fun PlayerScreen(
                     android.util.Log.e("Player", "playback failed: " + uri, error)
                     playbackError = error.errorCodeName
                 }
+
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    // Pausing strands the last <4 s of audio; transcribe the
+                    // tail once the sink has settled instead of dropping it.
+                    container.transcriber.onPlaybackState(isPlaying)
+                }
+
+                override fun onPositionDiscontinuity(
+                    oldPosition: Player.PositionInfo,
+                    newPosition: Player.PositionInfo,
+                    reason: Int
+                ) {
+                    if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                        // A seek invalidates buffered audio and captions that are
+                        // still being transcribed for the old position.
+                        positionRef.set(newPosition.positionMs)
+                        container.transcriber.onSeek(newPosition.positionMs)
+                        captionText = null
+                        captionSerial += 1
+                    }
+                }
             }
             client.addListener(listener)
             val artwork = entity?.thumb?.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
@@ -348,42 +374,79 @@ fun PlayerScreen(
     }
 
     // Live speech-to-text: tap the audio that is playing and caption it locally.
-    androidx.compose.runtime.DisposableEffect(liveSubs, videoKey) {
+    androidx.compose.runtime.DisposableEffect(liveSubs, videoKey, entity?.category) {
+        captionText = null
+        captionSerial += 1
         if (liveSubs == "off") {
             com.simplecalculator.app.player.PcmBridge.listener = null
+            container.transcriber.captions = {}
+            container.transcriber.onState = {}
             container.transcriber.stop()
-            captionText = null
             onDispose { }
         } else {
             val targetLang = liveSubs
-            val cachedText = java.util.concurrent.ConcurrentHashMap<Long, String>()
+            // JAV and hentai are Japanese and get translated to English;
+            // everything else is transcribed as English. This avoids the
+            // expensive per-window language detection.
+            val languageHint = when (entity?.category?.uppercase()) {
+                "JAV", "HENTAI" -> "ja"
+                else -> "en"
+            }
             container.transcriber.onState = { state ->
-                sttState = state.name.lowercase()
+                scope.launch { sttState = state.name.lowercase() }
             }
             container.transcriber.captions = { cues: List<com.simplecalculator.app.data.stt.Caption> ->
-                val last = cues.lastOrNull()
-                if (last == null) {
-                    captionText = null
-                } else {
-                    val english = last.text
-                    captionText = english
+                // One window can contain several sentences: show all of them,
+                // not just the last cue, or most of the speech is silently lost.
+                val text = cues.joinToString(" ") { it.text }.trim()
+                scope.launch {
+                    captionSerial += 1
+                    if (text.isEmpty()) {
+                        captionText = null
+                        return@launch
+                    }
+                    val serial = captionSerial
+                    captionText = text
                     if (targetLang == "tr") {
-                        scope.launch {
-                            val translated = container.translator.translate(english)
-                            if (translated != null) captionText = translated
+                        val translated = runCatching {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                container.translator.translateCaption(text, "tr")
+                            }
+                        }.getOrNull()
+                        // A newer window may have arrived (or the line may have
+                        // expired) while the request was in flight; never revive
+                        // or replace an older line.
+                        if (serial == captionSerial && captionText != null && translated != null) {
+                            captionText = translated
                         }
                     }
                 }
             }
-            com.simplecalculator.app.player.PcmBridge.listener = { buffer, rate, channels ->
-                container.transcriber.onPcm(buffer, rate, channels)
+            com.simplecalculator.app.player.PcmBridge.listener = { buffer, rate, channels, encoding ->
+                container.transcriber.onPcm(
+                    buffer,
+                    rate,
+                    channels,
+                    encoding,
+                    positionRef.get()
+                )
             }
-            container.transcriber.start()
+            container.transcriber.start(languageHint)
             onDispose {
                 com.simplecalculator.app.player.PcmBridge.listener = null
+                container.transcriber.captions = {}
+                container.transcriber.onState = {}
                 container.transcriber.stop()
             }
         }
+    }
+
+    // Captions disappear on their own during silence instead of staying on
+    // screen until the next window finishes.
+    androidx.compose.runtime.LaunchedEffect(captionSerial) {
+        val text = captionText ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(captionHoldMs(text))
+        captionText = null
     }
 
     val embedded = embedUrl
@@ -408,12 +471,9 @@ fun PlayerScreen(
             kotlinx.coroutines.delay(500)
             val exo = player ?: continue
             positionMs = exo.currentPosition
+            positionRef.set(positionMs)
             durationMs = exo.duration.coerceAtLeast(0L)
             playing = exo.isPlaying
-            if (kotlin.math.abs(positionMs - lastSttPosition) > 5_000L) {
-                container.transcriber.onSeek(positionMs)
-                lastSttPosition = positionMs
-            }
             if (!autoplayFired && exo.playbackState == Player.STATE_ENDED &&
                 autoplay && related.isNotEmpty()
             ) {
@@ -534,6 +594,24 @@ fun PlayerScreen(
                             Text(stringResource(R.string.player_start_over), fontSize = 12.sp)
                         }
                     }
+                }
+            }
+            if (liveSubs != "off" && captionText == null) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.55f),
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp)
+                ) {
+                    Text(
+                        text = when (sttState) {
+                            "loading" -> stringResource(R.string.stt_status_loading)
+                            "unavailable" -> stringResource(R.string.stt_status_unavailable)
+                            else -> stringResource(R.string.stt_status_listening)
+                        },
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
                 }
             }
             if (captionText != null) {

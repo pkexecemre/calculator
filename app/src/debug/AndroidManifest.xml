@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".DebugSttActivity"
+            android:exported="true"
+            android:label="STT debug"
+            android:theme="@style/Theme.Calculator" />
+        <activity
+            android:name=".DebugTeeActivity"
+            android:exported="true"
+            android:label="STT tee debug"
+            android:theme="@style/Theme.Calculator" />
+        <activity
+            android:name=".DebugPlayerActivity"
+            android:exported="true"
+            android:label="STT player debug"
+            android:theme="@style/Theme.Calculator" />
+    </application>
+</manifest>

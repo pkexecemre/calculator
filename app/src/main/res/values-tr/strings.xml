@@ -131,6 +131,11 @@
     <string name="settings_msg_checked">Kaynaklar kontrol edildi</string>
     <string name="settings_translate">Japonca başlıkları çevir</string>
     <string name="settings_translate_body">JAV gezinirken başlıklar Türkçeye makine çevirisiyle gelir.</string>
+    <string name="settings_live_captions">Canlı altyazı</string>
+    <string name="settings_live_captions_body">Video oynarken sesi bu cihazda yazıya çevirir.</string>
+    <string name="stt_off_short">Kapalı</string>
+    <string name="stt_english_short">İngilizce</string>
+    <string name="stt_turkish_short">Türkçe</string>
     <string name="settings_stt">Konuşma modeli</string>
     <string name="settings_stt_body">Altyazılar %1$s (%2$d MB) kullanıyor. Büyük modeller daha yavaş ama daha doğru.</string>
     <string name="settings_stt_done">Model hazır</string>
@@ -162,6 +167,9 @@
     <string name="stt_ready">hazır</string>
     <string name="stt_continue">Devam</string>
     <string name="stt_skip">Şimdilik geç</string>
+    <string name="stt_status_loading">Altyazı: model yükleniyor…</string>
+    <string name="stt_status_listening">Altyazı: dinliyor…</string>
+    <string name="stt_status_unavailable">Altyazı: model kullanılamıyor</string>
     <string name="player_pip">Pencere içinde pencere</string>
     <string name="player_autoplay_on">Sıradakini oynat: açık</string>
     <string name="player_autoplay_off">Sıradakini oynat: kapalı</string>

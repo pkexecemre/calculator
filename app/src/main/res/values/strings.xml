@@ -131,6 +131,11 @@
     <string name="settings_msg_checked">Sources checked</string>
     <string name="settings_translate">Translate Japanese titles</string>
     <string name="settings_translate_body">Titles are machine-translated to English while browsing JAV.</string>
+    <string name="settings_live_captions">Live captions</string>
+    <string name="settings_live_captions_body">Transcribes the audio while a video plays, on this device.</string>
+    <string name="stt_off_short">Off</string>
+    <string name="stt_english_short">English</string>
+    <string name="stt_turkish_short">Türkçe</string>
     <string name="settings_stt">Speech model</string>
     <string name="settings_stt_body">Captions use %1$s (%2$d MB). Bigger models are slower but more accurate.</string>
     <string name="settings_stt_done">Model ready</string>
@@ -162,6 +167,9 @@
     <string name="stt_ready">ready</string>
     <string name="stt_continue">Continue</string>
     <string name="stt_skip">Skip for now</string>
+    <string name="stt_status_loading">Captions: loading model…</string>
+    <string name="stt_status_listening">Captions: listening…</string>
+    <string name="stt_status_unavailable">Captions: model unavailable</string>
     <string name="player_pip">Picture in picture</string>
     <string name="player_autoplay_on">Autoplay next: on</string>
     <string name="player_autoplay_off">Autoplay next: off</string>

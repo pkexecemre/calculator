@@ -67,14 +67,19 @@ lockout. The app re-locks 90 seconds after it goes to the background.
   (`EXT-X-MEDIA:TYPE=SUBTITLES`), offers Off / English / Türkçe, and translates
   the cues for Turkish on demand.
 - **On-device captions** for videos that ship without subtitles: a tee in the
-  audio sink feeds decoded PCM to whisper.cpp, which transcribes 12 s windows
-  while the video plays. Captions never wait for a full download and reset on
-  seek. English is native; Turkish comes from the cached cue translator. All
-  inference happens on the phone — no audio leaves the device.
-- The **base model ships inside the APK** (56 MB), so captions work on a fresh
+  audio sink feeds decoded PCM to whisper.cpp. It transcribes 4 s windows with
+  1 s of lead-in, so the first line lands within a few seconds of playback
+  starting and then updates continuously. Silence is skipped, words repeated
+  across the overlap are removed, stale windows are dropped instead of falling
+  behind, and pausing transcribes the tail instead of discarding it. A model
+  that is too slow for the phone automatically falls back to the bundled one.
+  The bundled model is multilingual: English speech is transcribed and Japanese
+  (JAV/hentai) is translated to English, while Turkish goes through the cached
+  translator. All inference happens on the phone — no audio leaves the device.
+- The **Base model ships inside the APK** (57 MB), so captions work on a fresh
   install with no download. First-run offers larger models — Small (181 MB) or
-  Large v3 Turbo (547 MB, newest ggml Whisper) — with a progress bar and a Skip
-  button; the same picker lives in Settings.
+  Large v3 Turbo (547 MB) — with a progress bar and a Skip button; the same
+  picker lives in Settings.
 - Hentai search filters out results whose titles do not match the query, and a
   **Studios / User uploads / VR-VTuber** chip row keeps studio anime separate
   from user-generated or VR slop.

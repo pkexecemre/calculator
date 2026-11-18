@@ -15,24 +15,24 @@ import java.nio.ByteBuffer
 @UnstableApi
 class TeeAudioSink(
     context: Context,
-    private val onPcm: (ByteBuffer, Int, Int) -> Unit
+    private val onPcm: (ByteBuffer, Int, Int, Int) -> Unit
 ) : DefaultRenderersFactory(context) {
 
     private val tee = TeeAudioProcessor(object : TeeAudioProcessor.AudioBufferSink {
         private var sampleRate = 48_000
         private var channels = 2
+        private var encoding = 2 // C.ENCODING_PCM_16BIT
 
         override fun flush(sampleRateHz: Int, channelCount: Int, encoding: Int) {
             sampleRate = sampleRateHz
             channels = channelCount
+            this.encoding = encoding
         }
 
         override fun handleBuffer(buffer: ByteBuffer) {
-            // The tee owns the buffer only for this call: copy before returning.
-            val copy = ByteBuffer.allocate(buffer.remaining())
-            copy.put(buffer.duplicate())
-            copy.flip()
-            onPcm(copy, sampleRate, channels)
+            // The consumer reads the buffer synchronously before returning, so
+            // there is no need to allocate a copy for every audio callback.
+            onPcm(buffer, sampleRate, channels, encoding)
         }
     })
 

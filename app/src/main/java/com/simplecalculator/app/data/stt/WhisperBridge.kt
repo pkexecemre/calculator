@@ -11,12 +11,18 @@ internal object WhisperBridge {
 
     external fun nativeFree()
 
-    /** Returns "startMs|endMs|text" lines for one 16 kHz mono chunk. */
+    /**
+     * Returns "startMs\tendMs\tnoSpeechProb\ttext" lines for one 16 kHz mono
+     * chunk. [audioCtx] shortens Whisper's 30 s encoder context to match a short
+     * window; 0 keeps the model default.
+     */
     external fun nativeTranscribe(
         pcm: FloatArray,
         length: Int,
         translateToEnglish: Boolean,
         language: String?,
-        threads: Int
+        threads: Int,
+        initialPrompt: String?,
+        audioCtx: Int
     ): String
 }

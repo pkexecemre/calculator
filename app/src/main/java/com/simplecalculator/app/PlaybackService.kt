@@ -38,8 +38,8 @@ class PlaybackService : MediaSessionService() {
             )
             .build()
         // A tee in the audio sink lets the player transcribe what it is playing.
-        val renderers = com.simplecalculator.app.player.TeeAudioSink(this) { buffer, rate, channels ->
-            com.simplecalculator.app.player.PcmBridge.emit(buffer, rate, channels)
+        val renderers = com.simplecalculator.app.player.TeeAudioSink(this) { buffer, rate, channels, encoding ->
+            com.simplecalculator.app.player.PcmBridge.emit(buffer, rate, channels, encoding)
         }
         val player = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))

@@ -2,6 +2,8 @@ package com.simplecalculator.app.data.stt
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,6 +18,7 @@ class ModelStore(context: Context, private val http: OkHttpClient) {
     private val dir = File(context.filesDir, "stt").apply { mkdirs() }
     private val prefs = context.getSharedPreferences("stt", Context.MODE_PRIVATE)
     private val assets = context.assets
+    private val fileGate = Mutex()
 
     fun selected(): SttModel = ModelCatalog.byId(prefs.getString("model_id", "base"))
 
@@ -26,17 +29,39 @@ class ModelStore(context: Context, private val http: OkHttpClient) {
     fun isReady(model: SttModel = selected()): Boolean =
         fileFor(model).let { it.exists() && it.length() > MIN_BYTES }
 
-    /** Copies the bundled model out of the APK on first use. */
+    /**
+     * Copies the bundled model out of the APK on first use. The app copies it
+     * at startup while the player may start captioning at the same time, so the
+     * copy is serialized and finalized with a rename; two writers must never
+     * interleave into one 57 MB file.
+     */
     suspend fun ensureBundled(): Boolean = withContext(Dispatchers.IO) {
-        val model = ModelCatalog.all.firstOrNull { it.bundled } ?: return@withContext false
-        val target = fileFor(model)
-        if (target.exists() && target.length() > MIN_BYTES) return@withContext true
-        runCatching {
-            assets.open("models/${model.file}").use { input ->
-                target.outputStream().use { output -> input.copyTo(output, 512 * 1024) }
+        fileGate.withLock {
+            // Older builds bundled an English-only base; do not keep 56 MB around.
+            File(dir, "ggml-base.en-q5_1.bin").delete()
+            val model = ModelCatalog.all.firstOrNull { it.bundled } ?: return@withLock false
+            val target = fileFor(model)
+            if (target.exists() && target.length() > MIN_BYTES) return@withLock true
+            val temp = File(dir, model.file + ".copying")
+            temp.delete()
+            val ok = runCatching {
+                assets.open("models/${model.file}").use { input ->
+                    temp.outputStream().use { output -> input.copyTo(output, 512 * 1024) }
+                }
+                if (temp.length() <= MIN_BYTES) {
+                    temp.delete()
+                    false
+                } else {
+                    target.delete()
+                    temp.renameTo(target)
+                }
+            }.getOrDefault(false)
+            if (!ok) {
+                temp.delete()
+                target.delete()
             }
-            target.length() > MIN_BYTES
-        }.getOrDefault(false)
+            ok
+        }
     }
 
     /**

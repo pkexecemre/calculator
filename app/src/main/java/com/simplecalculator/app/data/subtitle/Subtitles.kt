@@ -51,7 +51,11 @@ class Subtitles(
             val translated = coroutineScope {
                 cues.map { cue ->
                     async {
-                        if (language == "en") cue.text else translator.translate(cue.text) ?: cue.text
+                        if (language == "en") {
+                            cue.text
+                        } else {
+                            translator.translateCaption(cue.text, language) ?: cue.text
+                        }
                     }
                 }.map { it.await() }
             }
