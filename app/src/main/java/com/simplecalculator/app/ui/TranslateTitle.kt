@@ -27,6 +27,9 @@ fun translatedTitle(original: String, enabled: Boolean): String? {
         if (!enabled || translated != null) return@LaunchedEffect
         if (!allowed) return@LaunchedEffect
         if (!container.translator.needsTranslation(original)) return@LaunchedEffect
+        // Give artwork and the tapped title priority; a card scrolled away
+        // before this delay never spends a translation request.
+        kotlinx.coroutines.delay(300L)
         translated = container.translator.translate(original)
     }
     return translated

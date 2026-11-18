@@ -171,6 +171,8 @@
     <string name="stt_status_loading">Altyazı: model yükleniyor…</string>
     <string name="stt_status_listening">Altyazı: dinliyor…</string>
     <string name="stt_status_unavailable">Altyazı: model kullanılamıyor</string>
+    <string name="stt_status_no_audio">Altyazı: ses bekleniyor…</string>
+    <string name="stt_status_slow">Altyazı: hâlâ işleniyor…</string>
     <string name="player_pip">Pencere içinde pencere</string>
     <string name="player_autoplay_on">Sıradakini oynat: açık</string>
     <string name="player_autoplay_off">Sıradakini oynat: kapalı</string>

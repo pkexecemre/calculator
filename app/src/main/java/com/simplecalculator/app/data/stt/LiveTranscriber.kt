@@ -47,6 +47,7 @@ class LiveTranscriber(
     private var loader: Job? = null
     private var idleUnload: Job? = null
     private var flushJob: Job? = null
+    private var watchdog: Job? = null
     private var fallbackDone = false
 
     private var resampler: StreamResampler? = null
@@ -60,11 +61,13 @@ class LiveTranscriber(
     @Volatile private var languageHint: String? = null
     @Volatile private var loaded: SttModel? = null
     @Volatile private var sawPcm = false
+    @Volatile private var sessionPcm = false
+    @Volatile private var sessionCue = false
 
     var captions: (List<Caption>) -> Unit = {}
     var onState: (State) -> Unit = {}
 
-    enum class State { IDLE, LOADING, LISTENING, UNAVAILABLE }
+    enum class State { IDLE, LOADING, LISTENING, NO_AUDIO, SLOW, UNAVAILABLE }
 
     /**
      * @param languageHint source language of the video ("en", "ja", ...).
@@ -74,12 +77,16 @@ class LiveTranscriber(
     fun start(languageHint: String? = null) {
         this.languageHint = languageHint?.trim()?.lowercase()?.takeIf { it != "auto" && it.isNotEmpty() }
         flushJob?.cancel()
+        watchdog?.cancel()
+        watchdog = null
         idleUnload?.cancel()
         idleUnload = null
         loader?.cancel()
         worker?.cancel()
         ready.set(false)
         loaded = null
+        sessionPcm = false
+        sessionCue = false
         fallbackDone = false
         speedGuard.reset()
         epoch.incrementAndGet()
@@ -108,11 +115,31 @@ class LiveTranscriber(
             onState(State.LISTENING)
             worker?.cancel()
             worker = scope.launch { consume() }
+            startWatchdog(generation)
+        }
+    }
+
+    /**
+     * Distinguishes "captions are merely slow" from "no audio is reaching the
+     * transcriber" instead of showing "listening" forever.
+     */
+    private fun startWatchdog(generation: Long) {
+        watchdog?.cancel()
+        watchdog = scope.launch {
+            delay(6_000L)
+            if (generation != epoch.get() || !ready.get()) return@launch
+            if (!sessionPcm) onState(State.NO_AUDIO)
+            delay(8_000L)
+            if (generation == epoch.get() && ready.get() && sessionPcm && !sessionCue) {
+                onState(State.SLOW)
+            }
         }
     }
 
     fun stop() {
         flushJob?.cancel()
+        watchdog?.cancel()
+        watchdog = null
         ready.set(false)
         epoch.incrementAndGet()
         worker?.cancel()
@@ -162,6 +189,10 @@ class LiveTranscriber(
         if (!sawPcm) {
             sawPcm = true
             Log.i(TAG, "pcm flowing: rate=$sampleRate ch=$channelCount encoding=$encoding")
+        }
+        if (!sessionPcm) {
+            sessionPcm = true
+            onState(State.LISTENING)
         }
 
         if (mono.size < frames) mono = FloatArray(frames)
@@ -361,6 +392,10 @@ class LiveTranscriber(
                 continue
             }
             if (cues.isNotEmpty()) {
+                if (!sessionCue) {
+                    sessionCue = true
+                    onState(State.LISTENING)
+                }
                 captions(cues)
             }
             Log.i(

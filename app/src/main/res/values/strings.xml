@@ -171,6 +171,8 @@
     <string name="stt_status_loading">Captions: loading model…</string>
     <string name="stt_status_listening">Captions: listening…</string>
     <string name="stt_status_unavailable">Captions: model unavailable</string>
+    <string name="stt_status_no_audio">Captions: waiting for audio…</string>
+    <string name="stt_status_slow">Captions: still transcribing…</string>
     <string name="player_pip">Picture in picture</string>
     <string name="player_autoplay_on">Autoplay next: on</string>
     <string name="player_autoplay_off">Autoplay next: off</string>

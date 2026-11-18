@@ -626,6 +626,8 @@ fun PlayerScreen(
                         text = when (sttState) {
                             "loading" -> stringResource(R.string.stt_status_loading)
                             "unavailable" -> stringResource(R.string.stt_status_unavailable)
+                            "no_audio" -> stringResource(R.string.stt_status_no_audio)
+                            "slow" -> stringResource(R.string.stt_status_slow)
                             else -> stringResource(R.string.stt_status_listening)
                         },
                         fontSize = 12.sp,

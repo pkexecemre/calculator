@@ -14,7 +14,7 @@ object ContentFilters {
      * studio releases; this kind of title should not own the trending feed.
      */
     private val LOW_QUALITY = Regex(
-        """(?i)\b(toilet|toire|hidden[ ._-]?cam(era)?|secret[ ._-]?cam|voyeur|spy[ ._-]?cam|peeping|peep(ing)?|upskirt|scat|poop|urine|golden[ ._-]?shower|pee(ing)?|tousatsu|tosatsu|kakushi.?dori|nozoki|omorashi|houryou)\b|トイレ|盗撮|隠し撮り|のぞき|覗き|おもらし|放尿|排泄|スカトロ|うんこ|偷拍|偷窺|偷窥|厕所|廁所"""
+        """(?i)\b(toilet|toire|hidden[ ._-]?cam(era)?|secret[ ._-]?cam|voyeur|spy[ ._-]?cam|peeping|peep(ing)?|upskirt|scat|poop|urine|golden[ ._-]?shower|pee(ing)?|tousatsu|tosatsu|kakushi.?dori|nozoki|omorashi|houryou|jvip|kissjav_|zip)\b|【\d+人】|コレクション|総集編|トイレ|盗撮|隠し撮り|のぞき|覗き|おもらし|放尿|排泄|スカトロ|うんこ|偷拍|偷窺|偷窥|厕所|廁所"""
     )
 
     private val AMATEUR = Regex(
@@ -57,7 +57,13 @@ object ContentFilters {
         category: Category,
         sourceFilter: String?
     ): List<VideoSummary> = when (category) {
-        Category.JAV -> items.filterNot { isLowQuality(it.title, it.vkey) }
+        // The default JAV feed is a studio view. Once the viewer explicitly
+        // picks a source in Filters, show that source's catalogue as-is.
+        Category.JAV -> if (sourceFilter == null) {
+            items.filterNot { isLowQuality(it.title, it.vkey) }
+        } else {
+            items
+        }
         Category.LIVE -> {
             val allowCjk = sourceFilter != null && sourceFilter in JAPANESE_LIVE_SOURCES
             items.filterNot { video ->

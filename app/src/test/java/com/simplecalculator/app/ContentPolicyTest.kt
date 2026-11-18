@@ -34,6 +34,7 @@ class ContentPolicyTest {
         assertTrue(ContentFilters.isLowQuality("Hidden Camera in the toilet", "hidden-cam"))
         assertTrue(ContentFilters.isLowQuality("Voyeur peeping compilation", "voyeur"))
         assertTrue(ContentFilters.isLowQuality("toire nozoki", "toire-1"))
+        assertTrue(ContentFilters.isLowQuality("【50人】collection zip", "KISSJAV_6iiHLnt3"))
         assertFalse(ContentFilters.isLowQuality("SSIS-123 新人NO.1STYLE", "ssis-123"))
         assertFalse(ContentFilters.isLowQuality("Office lady drama", "office-1"))
         assertFalse(ContentFilters.isLowQuality("A scatterbrained romance", "romance-1"))
@@ -82,6 +83,12 @@ class ContentPolicyTest {
             sourceFilter = null
         )
         assertEquals(listOf("ssis-123"), filtered.map { it.vkey })
+        val explicit = ContentFilters.filterFeed(
+            listOf(studio, toilet),
+            Category.JAV,
+            sourceFilter = "tmo"
+        )
+        assertEquals(2, explicit.size)
     }
 
     @Test
