@@ -92,9 +92,12 @@ import com.simplecalculator.app.ui.theme.Surface2
 import com.simplecalculator.app.ui.theme.TextMuted
 import kotlinx.coroutines.launch
 
-/** How long a caption stays after it lands; longer lines need longer to read. */
+/**
+ * How long a caption stays after it lands. The minimum bridges the gap until
+ * the next four-second window finishes, and longer lines get more reading time.
+ */
 private fun captionHoldMs(text: String): Long =
-    (2_500L + text.length * 45L).coerceAtMost(7_000L)
+    (3_500L + text.length * 45L).coerceIn(4_000L, 8_000L)
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable

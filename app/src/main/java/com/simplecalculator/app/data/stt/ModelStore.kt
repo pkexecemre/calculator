@@ -119,8 +119,11 @@ class ModelStore(context: Context, private val http: OkHttpClient) {
                             // Connection dropped early: keep the part and resume.
                             lastError = "incomplete ($size/$total)"
                         } else if (size > MIN_BYTES) {
-                            target.delete()
-                            if (part.renameTo(target)) {
+                            val moved = fileGate.withLock {
+                                target.delete()
+                                part.renameTo(target)
+                            }
+                            if (moved) {
                                 onProgress(100)
                                 return@withContext true
                             }

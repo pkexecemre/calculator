@@ -334,7 +334,7 @@ class LiveTranscriber(
             if (speedGuard.sample(rtf) && !fallbackDone && model.id != bundledModel()?.id) {
                 fallbackDone = true
                 switchToBundled(model, rtf)
-                if (!ready.get()) continue
+                if (!ready.get() || chunk.epoch != epoch.get()) continue
             }
             if (inferMs > MAX_RESULT_LATENCY_MS) {
                 Log.w(TAG, "drop slow result cut=${chunk.cutMs}ms infer=${inferMs}ms")
@@ -347,6 +347,12 @@ class LiveTranscriber(
 
             val segments = parseSegments(raw, chunk.startMs)
             val cues = assembler.accept(segments, chunk.cutMs)
+            if (chunk.epoch != epoch.get()) {
+                // A seek landed while this window was being assembled; the
+                // cues belong to the old position and must not be shown.
+                assembler.reset()
+                continue
+            }
             if (cues.isNotEmpty()) {
                 captions(cues)
             }

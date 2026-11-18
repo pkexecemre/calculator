@@ -142,6 +142,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 A Gradle 8.14.3 wrapper is included, so `./gradlew` works without a system Gradle.
 
+`tools/bench_stt.sh [adb-serial]` installs the debug APK, feeds the bundled
+English and Japanese samples through the real caption pipeline, and prints the
+inference time and RTF for each window — useful for checking a phone's
+real-world caption speed.
+
 ## Tests
 
 `LIVE_PROBE=1 ./gradlew :app:testDebugUnitTest --tests '*LiveProbeTest'` walks
@@ -167,7 +172,7 @@ lulustream are followed one level and unpacked the same way, which made JAV-NONI
 and JAV-FUN native as well — these hosts serve a JS-only page when the request
 carries a full browser `Accept` header, so embed fetches stay minimal.
 
-`./gradlew :app:testDebugUnitTest` runs **68 tests**: saved real/archived pages
+`./gradlew :app:testDebugUnitTest` runs **92 tests**: saved real/archived pages
 for all 23 sources (`LiveFixtureTest`), synthetic stream-extraction cases, the
 original parser fixtures, source-health behavior, calculator expressions and
 the feed mixer. A site change now fails a test instead of the UI.
