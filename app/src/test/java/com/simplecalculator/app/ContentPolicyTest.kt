@@ -88,6 +88,8 @@ class ContentPolicyTest {
         val studio = ContentFilters.qualityScore("SSIS-123 新人", "ssis-123", "msav")
         val amateur = ContentFilters.qualityScore("素人 個人撮影", "amateur-1", "tmo")
         assertTrue(studio > amateur + 2.0)
+        val fc2 = ContentFilters.qualityScore("FC2-PPV-5001234", "fc2-ppv-5001234", "msav")
+        assertTrue(studio > fc2 + 1.5)
     }
 
     @Test

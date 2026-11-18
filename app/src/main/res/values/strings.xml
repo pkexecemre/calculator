@@ -142,6 +142,7 @@
     <string name="settings_sources">Source health</string>
     <string name="settings_sources_body">A source is paused for 30 minutes after 3 failed loads. This list is live.</string>
     <string name="settings_sources_check">Check all sources now</string>
+    <string name="settings_sources_tls">TLS trust failed: disable the VPN / ad-blocker or install its certificate, then check all sources again.</string>
     <string name="settings_source_ok">ok</string>
     <string name="settings_source_paused">paused</string>
     <string name="settings_source_failed">%1$d fails</string>

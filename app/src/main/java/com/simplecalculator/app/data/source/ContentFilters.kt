@@ -18,11 +18,11 @@ object ContentFilters {
     )
 
     private val AMATEUR = Regex(
-        """(?i)\\b(amateur|homemade|ugc|personal[ ._-]?filming|private[ ._-]?filming)\\b|素人|個人撮影|ハメ撮り"""
+        """(?i)\b(amateur|homemade|ugc|personal[ ._-]?filming|private[ ._-]?filming|fc2|fc2-ppv)\b|素人|個人撮影|ハメ撮り"""
     )
 
     /** JAV product codes such as SSIS-123 or ssis-123. */
-    private val PRODUCT_CODE = Regex("""(?i)\\b[a-z]{2,6}[-_]\\d{2,5}\\b""")
+    private val PRODUCT_CODE = Regex("""(?i)\b[a-z]{2,6}[-_]\d{2,5}\b""")
 
     /** Japanese live catalogues: selectable in Filters, but not in the default Live feed. */
     val JAPANESE_LIVE_SOURCES: Set<String> = setOf("141", "avg")

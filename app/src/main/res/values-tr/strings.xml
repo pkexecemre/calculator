@@ -142,6 +142,7 @@
     <string name="settings_sources">Kaynak durumu</string>
     <string name="settings_sources_body">3 başarısız yüklemeden sonra bir kaynak 30 dakika duraklatılır. Bu liste canlıdır.</string>
     <string name="settings_sources_check">Tüm kaynakları şimdi kontrol et</string>
+    <string name="settings_sources_tls">TLS güveni başarısız: VPN / reklam engelleyiciyi kapat veya sertifikasını yükle, sonra tüm kaynakları yeniden kontrol et.</string>
     <string name="settings_source_ok">tamam</string>
     <string name="settings_source_paused">duraklatıldı</string>
     <string name="settings_source_failed">%1$d hata</string>

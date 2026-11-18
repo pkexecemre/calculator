@@ -272,6 +272,9 @@ fun SettingsScreen() {
             onClick = {
                 scope.launch {
                     message = context.getString(R.string.settings_msg_checking)
+                    // A paused source is skipped by the feed, so clear health
+                    // first or this button just reports the old pause again.
+                    container.health.resetAll(container.sources.all())
                     Category.entries.forEach { category ->
                         runCatching { container.content.feed(category, 1) }
                     }
@@ -281,6 +284,17 @@ fun SettingsScreen() {
             },
             modifier = Modifier.fillMaxWidth()
         ) { Text(stringResource(R.string.settings_sources_check)) }
+        val tlsProblem = sourceInfos.any {
+            it.lastError?.contains("TLS certificate", ignoreCase = true) == true
+        }
+        if (tlsProblem) {
+            Text(
+                text = stringResource(R.string.settings_sources_tls),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
         Spacer(Modifier.height(8.dp))
         sourceInfos.forEach { info ->
             val status = when {

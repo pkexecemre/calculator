@@ -90,6 +90,7 @@ import com.simplecalculator.app.ui.LocalContainer
 import com.simplecalculator.app.ui.Thumb
 import com.simplecalculator.app.ui.theme.Surface2
 import com.simplecalculator.app.ui.theme.TextMuted
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 /**
@@ -221,12 +222,27 @@ fun PlayerScreen(
             )
         }
         streamUrlForSubs = playUri
-        comments = runCatching {
-            container.content.comments(cached.vkey, cached.sourceId, parsed?.commentsUrl, 0)
-        }.getOrDefault(emptyList())
-        related = container.content.related(cached.vkey, cached.sourceId, parsed?.relatedUrl).take(12)
+        // Show the player/metadata now; comments and related videos are
+        // secondary and should not keep the page behind a spinner.
         loading = false
         container.content.recordView(cached, false)
+        kotlinx.coroutines.coroutineScope {
+            val commentsJob = async {
+                runCatching {
+                    container.content.comments(
+                        cached.vkey, cached.sourceId, parsed?.commentsUrl, 0
+                    )
+                }.getOrDefault(emptyList())
+            }
+            val relatedJob = async {
+                runCatching {
+                    container.content.related(cached.vkey, cached.sourceId, parsed?.relatedUrl)
+                        .take(12)
+                }.getOrDefault(emptyList())
+            }
+            comments = commentsJob.await()
+            related = relatedJob.await()
+        }
     }
 
     fun buildItem(
