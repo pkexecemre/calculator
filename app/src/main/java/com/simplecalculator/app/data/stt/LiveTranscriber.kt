@@ -108,7 +108,7 @@ class LiveTranscriber(
         for (chunk in queue) {
             if (!ready.get()) continue
             val raw = gate.withLock {
-                WhisperBridge.nativeTranscribe(chunk.pcm, chunk.pcm.size, false)
+                WhisperBridge.nativeTranscribe(chunk.pcm, chunk.pcm.size, false, null, 4)
             }
             val cues = parse(raw, chunk.startMs)
             if (cues.isNotEmpty()) {

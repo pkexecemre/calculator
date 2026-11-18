@@ -39,7 +39,8 @@ Java_com_simplecalculator_app_data_stt_WhisperBridge_nativeFree(JNIEnv *, jobjec
 /** Returns newline separated "startMs|endMs|text" for one chunk. */
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_simplecalculator_app_data_stt_WhisperBridge_nativeTranscribe(
-        JNIEnv *env, jobject, jfloatArray pcm, jint length, jboolean translateToEnglish) {
+        JNIEnv *env, jobject, jfloatArray pcm, jint length, jboolean translateToEnglish,
+        jstring language, jint threads) {
     if (g_ctx == nullptr) return env->NewStringUTF("");
 
     jfloat *samples = env->GetFloatArrayElements(pcm, nullptr);
@@ -49,10 +50,14 @@ Java_com_simplecalculator_app_data_stt_WhisperBridge_nativeTranscribe(
     params.print_timestamps = false;
     params.print_special = false;
     params.translate = translateToEnglish == JNI_TRUE;
+    if (language != nullptr) {
+        const char *lang = env->GetStringUTFChars(language, nullptr);
+        params.language = lang;
+    }
     params.single_segment = false;
     params.no_context = true;
     params.suppress_blank = true;
-    params.n_threads = 4;
+    params.n_threads = threads > 0 ? threads : 4;
 
     std::string out;
     if (whisper_full(g_ctx, params, samples, length) == 0) {

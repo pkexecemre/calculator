@@ -243,8 +243,9 @@ fun SettingsScreen() {
                     enabled = !active || !ready
                 ) {
                     Text(
-                        if (active && ready) "✓ ${model.label}" else model.label,
-                        style = MaterialTheme.typography.labelSmall
+                        text = if (active && ready) "✓ ${model.shortLabel}" else model.shortLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1
                     )
                 }
             }

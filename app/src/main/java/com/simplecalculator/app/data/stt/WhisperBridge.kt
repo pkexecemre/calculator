@@ -12,5 +12,11 @@ internal object WhisperBridge {
     external fun nativeFree()
 
     /** Returns "startMs|endMs|text" lines for one 16 kHz mono chunk. */
-    external fun nativeTranscribe(pcm: FloatArray, length: Int, translateToEnglish: Boolean): String
+    external fun nativeTranscribe(
+        pcm: FloatArray,
+        length: Int,
+        translateToEnglish: Boolean,
+        language: String?,
+        threads: Int
+    ): String
 }

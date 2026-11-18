@@ -39,41 +39,90 @@ class ModelStore(context: Context, private val http: OkHttpClient) {
         }.getOrDefault(false)
     }
 
-    /** Streams a model to disk; [onProgress] is 0..100. */
+    /**
+     * Downloads a model with resume support. The shared HTTP client has a 30 s
+     * call timeout, which aborts any large file, so this uses its own client
+     * without a total-call limit and keeps a `.part` file to continue from.
+     */
     suspend fun download(model: SttModel, onProgress: (Int) -> Unit): Boolean =
         withContext(Dispatchers.IO) {
             val target = fileFor(model)
-            val partial = File(dir, "${model.file}.part")
-            runCatching {
-                val request = Request.Builder().url(ModelCatalog.url(model)).build()
-                http.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@use false
-                    val total = response.body?.contentLength() ?: -1L
-                    response.body?.byteStream()?.use { input ->
-                        partial.outputStream().use { output ->
-                            val buffer = ByteArray(512 * 1024)
-                            var written = 0L
-                            while (true) {
-                                val read = input.read(buffer)
-                                if (read < 0) break
-                                output.write(buffer, 0, read)
-                                written += read
-                                if (total > 0) onProgress(((written * 100) / total).toInt())
+            val part = File(dir, "${model.file}.part")
+            var attempt = 0
+            var lastError: String? = null
+
+            while (attempt < MAX_ATTEMPTS) {
+                attempt++
+                val existing = if (part.exists()) part.length() else 0L
+                val builder = Request.Builder().url(ModelCatalog.url(model))
+                if (existing > 0) builder.header("Range", "bytes=$existing-")
+
+                try {
+                    downloadClient.newCall(builder.build()).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            lastError = "HTTP ${response.code}"
+                            return@use
+                        }
+                        val append = response.code == 206
+                        if (!append && existing > 0) part.delete()
+
+                        val total = totalBytes(response, if (append) existing else 0L)
+                        val startAt = if (append) existing else 0L
+                        val body = response.body ?: run {
+                            lastError = "empty body"
+                            return@use
+                        }
+                        body.byteStream().use { input ->
+                            // Append mode keeps whatever a previous attempt wrote.
+                            java.io.FileOutputStream(part, append).use { output ->
+                                val buffer = ByteArray(512 * 1024)
+                                var written = startAt
+                                while (true) {
+                                    val read = input.read(buffer)
+                                    if (read < 0) break
+                                    output.write(buffer, 0, read)
+                                    written += read
+                                    if (total > 0) {
+                                        onProgress(((written * 100) / total).toInt().coerceIn(0, 99))
+                                    }
+                                }
+                                output.flush()
                             }
                         }
+                        val size = part.length()
+                        if (total > 0 && size < total) {
+                            // Connection dropped early: keep the part and resume.
+                            lastError = "incomplete ($size/$total)"
+                        } else if (size > MIN_BYTES) {
+                            target.delete()
+                            if (part.renameTo(target)) {
+                                onProgress(100)
+                                return@withContext true
+                            }
+                            lastError = "could not finalize"
+                        } else {
+                            part.delete()
+                            lastError = "file too small"
+                        }
                     }
-                    true
+                } catch (e: Exception) {
+                    lastError = e.message
                 }
-            }.getOrDefault(false).also { ok ->
-                if (ok && partial.length() > MIN_BYTES) {
-                    target.delete()
-                    partial.renameTo(target)
-                    onProgress(100)
-                } else {
-                    partial.delete()
-                }
+                kotlinx.coroutines.delay(1_000L * attempt)
             }
+            android.util.Log.w("ModelStore", "download failed for ${model.id}: $lastError")
+            false
         }
+
+    /** Total size of the finished file, honouring Content-Range on resumed calls. */
+    private fun totalBytes(response: okhttp3.Response, alreadyHave: Long): Long {
+        val range = response.header("Content-Range")
+        if (range != null) {
+            range.substringAfter('/', "").trim().toLongOrNull()?.let { return it }
+        }
+        val length = response.body?.contentLength() ?: -1L
+        return if (length > 0) length + alreadyHave else -1L
+    }
 
     fun delete(model: SttModel) {
         if (model.bundled) return
@@ -83,7 +132,17 @@ class ModelStore(context: Context, private val http: OkHttpClient) {
     fun sizeLabel(model: SttModel = selected()): String =
         "${model.sizeMb} MB"
 
+    /** No total call timeout: big models legitimately take minutes. */
+    private val downloadClient: OkHttpClient by lazy {
+        http.newBuilder()
+            .callTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
     private companion object {
         const val MIN_BYTES = 20L * 1024 * 1024
+        const val MAX_ATTEMPTS = 8
     }
 }

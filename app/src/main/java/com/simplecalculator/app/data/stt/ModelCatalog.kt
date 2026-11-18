@@ -7,6 +7,7 @@ package com.simplecalculator.app.data.stt
 data class SttModel(
     val id: String,
     val label: String,
+    val shortLabel: String,
     val file: String,
     val sizeMb: Int,
     val note: String,
@@ -19,6 +20,7 @@ object ModelCatalog {
         SttModel(
             id = "base",
             label = "Base (English)",
+            shortLabel = "Base",
             file = "ggml-base.en-q5_1.bin",
             sizeMb = 56,
             note = "Ships inside the app. Fast, good for clear speech.",
@@ -27,6 +29,7 @@ object ModelCatalog {
         SttModel(
             id = "small",
             label = "Small (English)",
+            shortLabel = "Small",
             file = "ggml-small.en-q5_1.bin",
             sizeMb = 181,
             note = "Better with accents and background noise."
@@ -34,6 +37,7 @@ object ModelCatalog {
         SttModel(
             id = "large",
             label = "Large v3 Turbo (multilingual)",
+            shortLabel = "Large Turbo",
             file = "ggml-large-v3-turbo-q5_0.bin",
             sizeMb = 547,
             note = "Most accurate. Heavy: needs a recent phone and a fast CPU."
