@@ -80,7 +80,7 @@
     <string name="gate_body">Uygulamanın bu bölümü yetişkin animasyonudur ve diğerinden ayrıdır. 18 yaşında veya üstünde olduğunu doğrula.</string>
     <string name="gate_accept">18 yaşından büyüğüm</string>
     <string name="home_empty_title">Bir şey yüklenmedi</string>
-    <string name="home_empty_body">Bağlantıyı kontrol edip yenile. Akış doğrudan kaynaktan geliyor.</string>
+    <string name="home_empty_body">Şu anda bir şey yüklenemedi. Yenilemek için aşağı çek.</string>
 
     <string name="search_hint">Video ara</string>
     <string name="search_results">%1$d sonuç</string>

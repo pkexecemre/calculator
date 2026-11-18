@@ -58,8 +58,6 @@ fun SettingsScreen() {
     var showCodeDialog by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
-    var sourceRefresh by remember { mutableStateOf(0) }
-    val sourceInfos = remember(sourceRefresh) { container.health.snapshot(container.sources.all()) }
     val currentLocale = AppCompatDelegate.getApplicationLocales().toLanguageTags().ifBlank { Locale.getDefault().language }
 
     Column(
@@ -258,86 +256,6 @@ fun SettingsScreen() {
             )
         }
 
-        Spacer(Modifier.height(24.dp))
-        HorizontalDivider()
-        Spacer(Modifier.height(16.dp))
-        Text(stringResource(R.string.settings_sources), style = MaterialTheme.typography.titleSmall)
-        Text(
-            text = stringResource(R.string.settings_sources_body),
-            style = MaterialTheme.typography.bodySmall,
-            color = TextMuted
-        )
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = {
-                scope.launch {
-                    message = context.getString(R.string.settings_msg_checking)
-                    // A paused source is skipped by the feed, so clear health
-                    // first or this button just reports the old pause again.
-                    container.health.resetAll(container.sources.all())
-                    Category.entries.forEach { category ->
-                        runCatching { container.content.feed(category, 1) }
-                    }
-                    sourceRefresh++
-                    message = context.getString(R.string.settings_msg_checked)
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text(stringResource(R.string.settings_sources_check)) }
-        val tlsProblem = sourceInfos.any {
-            it.lastError?.contains("TLS certificate", ignoreCase = true) == true
-        }
-        if (tlsProblem) {
-            Text(
-                text = stringResource(R.string.settings_sources_tls),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        sourceInfos.forEach { info ->
-            val status = when {
-                info.isPaused -> stringResource(R.string.settings_source_paused)
-                info.failures > 0 -> stringResource(R.string.settings_source_failed, info.failures)
-                else -> stringResource(R.string.settings_source_ok)
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (info.failures > 0) "!" else "•",
-                    color = if (info.failures > 0) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.secondary
-                )
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(info.displayName, style = MaterialTheme.typography.labelMedium)
-                    if (info.lastError != null) {
-                        Text(
-                            text = info.lastError,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                Text(
-                    text = status,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (info.failures > 0) MaterialTheme.colorScheme.error else TextMuted
-                )
-                if (info.failures > 0) {
-                    TextButton(onClick = {
-                        container.health.reset(info.id)
-                        sourceRefresh++
-                    }) { Text(stringResource(R.string.settings_source_reset)) }
-                }
-            }
-        }
-
         Spacer(Modifier.height(28.dp))
         HorizontalDivider()
         Spacer(Modifier.height(16.dp))
@@ -345,7 +263,7 @@ fun SettingsScreen() {
         Spacer(Modifier.height(6.dp))
         Text(
             text = stringResource(R.string.settings_about_body) + "\n" +
-                container.sources.primary().displayName + " · v" + BuildConfig.VERSION_NAME,
+                "v" + BuildConfig.VERSION_NAME,
             style = MaterialTheme.typography.bodySmall,
             color = TextMuted
         )

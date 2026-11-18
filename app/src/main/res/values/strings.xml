@@ -80,7 +80,7 @@
     <string name="gate_body">This part of the app is adult animation and is separated from the rest. Confirm you are 18 or older.</string>
     <string name="gate_accept">I am 18 or older</string>
     <string name="home_empty_title">Nothing loaded</string>
-    <string name="home_empty_body">Check the connection and pull a refresh. The feed comes straight from the source.</string>
+    <string name="home_empty_body">Unable to load anything right now. Pull down to refresh.</string>
 
     <string name="search_hint">Search videos</string>
     <string name="search_results">%1$d results</string>

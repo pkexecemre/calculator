@@ -88,7 +88,6 @@ fun HomeScreen(
     var flavorFilter by remember { mutableStateOf<HentaiFlavor?>(null) }
     var releaseFilter by remember { mutableStateOf<String?>(null) }
     var sourceFilter by remember { mutableStateOf<String?>(null) }
-    var failures by remember { mutableStateOf<List<String>>(emptyList()) }
     val gridState = rememberLazyGridState()
     val history by container.content.history().collectAsStateWithLifecycle(initialValue = emptyList())
     val progressByKey = remember(history) {
@@ -157,7 +156,6 @@ fun HomeScreen(
                     if (update.items.isNotEmpty() || items.isEmpty()) {
                         items = update.items
                     }
-                    failures = update.failures
                     if (update.items.isNotEmpty()) loading = false
                 }
         }.onFailure { error = true }
@@ -220,7 +218,6 @@ fun HomeScreen(
                 }
                 page = next
             }
-            failures = container.content.lastFailures
         }
         loadingMore = false
     }
@@ -414,11 +411,7 @@ fun HomeScreen(
                     EmptyState(
                         title = stringResource(R.string.home_empty_title),
                         subtitle = when {
-                            failures.isNotEmpty() ->
-                                stringResource(R.string.source_unreachable) + " " +
-                                    failures.joinToString(", ")
                             releaseFilter != null -> stringResource(R.string.filter_release_empty)
-                            error -> stringResource(R.string.home_empty_body)
                             tagFilter == null -> stringResource(R.string.home_empty_body)
                             else -> stringResource(R.string.filter_empty_body)
                         }

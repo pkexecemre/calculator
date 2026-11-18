@@ -44,9 +44,9 @@ lockout. The app re-locks 90 seconds after it goes to the background.
   instead of horizontal chip rows, so 30 sources do not turn the feed into a
   scroll marathon.
 - Sources load in parallel (6 at a time, 12 s timeout), are deduplicated, and
-  unreachable ones are named in the feed/search instead of silently returning
-  an empty list. Three failures pause a source for 30 minutes; Settings has a
-  live health dashboard with reset buttons.
+  failed loads are retried automatically; three failures pause a source for 30
+  minutes. The viewer sees a plain retry message, never source names or error
+  jargon.
 - Hentai listings are grouped into **series**: the same title appears once, and
   opening it shows all episodes sorted by number, with the same episode mirrored
   across sites collapsed into one entry. The series screen re-searches the title
@@ -88,11 +88,10 @@ lockout. The app re-locks 90 seconds after it goes to the background.
   (JAV/hentai) is translated to English, while Turkish goes through the cached
   translator. All inference happens on the phone — no audio leaves the device.
 - The **Base model ships inside the APK** (57 MB), so captions work on a fresh
-  install with no download. First-run offers larger models — Small (181 MB) or
-  Large v3 Turbo (547 MB) — with a progress bar and a Skip button; the same
-  picker lives in Settings. Large Turbo is too slow for live captions on phone
-  CPUs, so the live pipeline deliberately keeps the bundled Base model while
-  watching.
+  install with no download and no setup screen. Settings offers optional larger
+  models — Small (181 MB) or Large v3 Turbo (547 MB). Large Turbo is too slow
+  for live captions on phone CPUs, so the live pipeline deliberately keeps the
+  bundled Base model while watching.
 - Hentai search filters out results whose titles do not match the query, and a
   **Studios / User uploads / VR-VTuber** chip row keeps studio anime separate
   from user-generated or VR slop.
@@ -210,8 +209,8 @@ issues found in review:
 - notification permission is requested on Android 13+, media sessions are
   restricted to our UI and system surfaces, and playback errors offer the next
   quality variant instead of only replaying the same URL;
-- source loads are parallel, time-limited and health-tracked with a Settings
-  dashboard and one-click reset; downloads report errors and support retry;
+- source loads are parallel, time-limited and health-tracked automatically;
+  downloads report errors and support retry;
 - the session is observable process-wide, so locking from anywhere immediately
   returns to the calculator; PiP, autoplay, gesture volume/brightness, media
   metadata, remembered speed, selected-quality downloads, `.nomedia` and a Room

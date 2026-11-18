@@ -152,9 +152,7 @@ fun PlayerScreen(
     var liveSubs by remember { mutableStateOf(prefsOf(context).getString("live_subs", "off") ?: "off") }
     var captionText by remember { mutableStateOf<String?>(null) }
     var captionSerial by remember { mutableStateOf(0) }
-    var sttState by remember { mutableStateOf("idle") }
     val positionRef = remember { java.util.concurrent.atomic.AtomicLong(0L) }
-    var modelProgress by remember { mutableStateOf<Int?>(null) }
     var subtitleChoice by remember { mutableStateOf("off") }
     var loadingSubs by remember { mutableStateOf(false) }
     var resumeNoticeMs by remember { mutableStateOf<Long?>(null) }
@@ -411,9 +409,6 @@ fun PlayerScreen(
                 "JAV", "HENTAI" -> "ja"
                 else -> "en"
             }
-            container.transcriber.onState = { state ->
-                scope.launch { sttState = state.name.lowercase() }
-            }
             container.transcriber.captions = { cues: List<com.simplecalculator.app.data.stt.Caption> ->
                 // One window can contain several sentences: show all of them,
                 // not just the last cue, or most of the speech is silently lost.
@@ -613,26 +608,6 @@ fun PlayerScreen(
                             Text(stringResource(R.string.player_start_over), fontSize = 12.sp)
                         }
                     }
-                }
-            }
-            if (liveSubs != "off" && captionText == null) {
-                Surface(
-                    color = Color.Black.copy(alpha = 0.55f),
-                    contentColor = Color.White,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp)
-                ) {
-                    Text(
-                        text = when (sttState) {
-                            "loading" -> stringResource(R.string.stt_status_loading)
-                            "unavailable" -> stringResource(R.string.stt_status_unavailable)
-                            "no_audio" -> stringResource(R.string.stt_status_no_audio)
-                            "slow" -> stringResource(R.string.stt_status_slow)
-                            else -> stringResource(R.string.stt_status_listening)
-                        },
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
                 }
             }
             if (captionText != null) {
@@ -905,32 +880,6 @@ fun PlayerScreen(
                                 liveSubs = code
                                 prefsOf(context).edit().putString("live_subs", code).apply()
                                 showMenu = false
-                            }
-                        )
-                    }
-                    if (!container.modelStore.isReady()) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    if (modelProgress != null) {
-                                        stringResource(R.string.stt_downloading, modelProgress ?: 0)
-                                    } else {
-                                        stringResource(R.string.stt_download)
-                                    }
-                                )
-                            },
-                            onClick = {
-                                scope.launch {
-                                    modelProgress = 0
-                                    val ok = container.modelStore.download(
-                                        container.modelStore.selected()
-                                    ) { modelProgress = it }
-                                    modelProgress = null
-                                    if (ok) {
-                                        liveSubs = "en"
-                                        prefsOf(context).edit().putString("live_subs", "en").apply()
-                                    }
-                                }
                             }
                         )
                     }

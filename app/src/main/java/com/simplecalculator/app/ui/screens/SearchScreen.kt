@@ -76,7 +76,6 @@ fun SearchScreen(
     var tagFilter by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var searched by remember { mutableStateOf(false) }
-    var failures by remember { mutableStateOf<List<String>>(emptyList()) }
     var page by remember { mutableStateOf(1) }
     var searchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val prefs = remember {
@@ -135,7 +134,6 @@ fun SearchScreen(
                             (items + update.items).distinctBy { it.key }
                         }
                     }
-                    failures = update.failures
                     if (items.isNotEmpty() || groups.isNotEmpty() || update.done) {
                         searched = true
                     }
@@ -296,14 +294,6 @@ fun SearchScreen(
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     Column {
                         SectionHeader(stringResource(R.string.search_results, listSize))
-                        if (failures.isNotEmpty()) {
-                            Text(
-                                text = stringResource(R.string.source_unreachable) + " " +
-                                    failures.joinToString(", "),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
                     }
                 }
                 if (category == Category.HENTAI) {
