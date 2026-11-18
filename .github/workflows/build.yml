@@ -47,16 +47,32 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
+      - name: Read the version from git
+        id: version
+        run: |
+          # Tag builds use the tag (v1.4.0 -> 1.4.0); branch builds use describe.
+          NAME=$(git describe --tags --always | sed 's/^v//')
+          CODE=$(git rev-list --count HEAD)
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "Building $NAME ($CODE)"
+
       - name: Unit tests
-        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+        run: |
+          ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace \
+            -PversionName=${{ steps.version.outputs.name }} \
+            -PversionCode=${{ steps.version.outputs.code }}
 
       - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon
+        run: |
+          ./gradlew :app:assembleDebug --no-daemon \
+            -PversionName=${{ steps.version.outputs.name }} \
+            -PversionCode=${{ steps.version.outputs.code }}
 
       - name: Name the APK
         id: apk
         run: |
-          VERSION=$(grep -oE 'versionName = "[^"]+"' app/build.gradle.kts | cut -d'"' -f2)
+          VERSION="${{ steps.version.outputs.name }}"
           SHORT=${GITHUB_SHA::7}
           NAME="calculator-${VERSION}-${SHORT}.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$NAME"

@@ -5,6 +5,27 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Version comes from git so every build can be installed over the previous one:
+// versionCode must increase, otherwise Android refuses the update.
+fun gitOutput(vararg args: String): String = try {
+    val process = ProcessBuilder("git", *args)
+        .directory(rootDir)
+        .redirectErrorStream(true)
+        .start()
+    process.inputStream.bufferedReader().readText().trim().also { process.waitFor() }
+} catch (e: Exception) {
+    ""
+}
+
+val gitCommitCount = gitOutput("rev-list", "--count", "HEAD").toIntOrNull() ?: 1
+val gitTag = gitOutput("describe", "--tags", "--abbrev=0").removePrefix("v")
+val gitDescribe = gitOutput("describe", "--tags", "--always").removePrefix("v").ifBlank { "0.0.0" }
+
+val buildVersionCode = (findProperty("versionCode") as String?)?.toIntOrNull()
+    ?: maxOf(1, gitCommitCount)
+val buildVersionName = (findProperty("versionName") as String?)
+    ?: if (gitTag.isNotBlank() && gitDescribe == gitTag) gitTag else gitDescribe
+
 android {
     namespace = "com.simplecalculator.app"
     compileSdk = 35
@@ -13,8 +34,8 @@ android {
         applicationId = "com.simplecalculator.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = buildVersionCode
+        versionName = buildVersionName
         resourceConfigurations += listOf("en", "tr")
     }
 
