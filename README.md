@@ -81,6 +81,9 @@ lockout. The app re-locks 90 seconds after it goes to the background.
   across the overlap are removed, stale windows are dropped instead of falling
   behind, and pausing transcribes the tail instead of discarding it. A model
   that is too slow for the phone automatically falls back to the bundled one.
+  The audio tap is normalized to little-endian PCM16 before captioning, and the
+  converter also understands 8/16/24/32-bit and float input, so a decoder format
+  change cannot silently kill the captions.
   The bundled model is multilingual: English speech is transcribed and Japanese
   (JAV/hentai) is translated to English, while Turkish goes through the cached
   translator. All inference happens on the phone — no audio leaves the device.
@@ -187,7 +190,7 @@ lulustream are followed one level and unpacked the same way, which made JAV-NONI
 and JAV-FUN native as well — these hosts serve a JS-only page when the request
 carries a full browser `Accept` header, so embed fetches stay minimal.
 
-`./gradlew :app:testDebugUnitTest` runs **103 tests**: saved real/archived pages
+`./gradlew :app:testDebugUnitTest` runs **109 tests**: saved real/archived pages
 for all 23 sources (`LiveFixtureTest`), synthetic stream-extraction cases, the
 original parser fixtures, source-health behavior, calculator expressions and
 the feed mixer. A site change now fails a test instead of the UI.

@@ -12,7 +12,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -177,15 +176,15 @@ class LiveTranscriber(
     ) {
         if (!ready.get() || sampleRate <= 0 || channelCount <= 0) return
         lastPositionMs = positionMs
-        val isFloat = encoding == ENCODING_PCM_FLOAT
-        val buffer = pcm.order(ByteOrder.LITTLE_ENDIAN)
-        val frames: Int
-        if (isFloat) {
-            frames = buffer.asFloatBuffer().remaining() / channelCount
-        } else {
-            frames = buffer.asShortBuffer().remaining() / channelCount
+        val bytesPerSample = PcmDecoder.bytesPerSample(encoding)
+        if (bytesPerSample <= 0) {
+            Log.w(TAG, "unsupported audio encoding=$encoding (not PCM)")
+            return
         }
+        val frames = pcm.remaining() / (bytesPerSample * channelCount)
         if (frames <= 0) return
+        if (mono.size < frames) mono = FloatArray(frames)
+        if (!PcmDecoder.toMono(pcm, encoding, channelCount, frames, mono)) return
         if (!sawPcm) {
             sawPcm = true
             Log.i(TAG, "pcm flowing: rate=$sampleRate ch=$channelCount encoding=$encoding")
@@ -193,23 +192,6 @@ class LiveTranscriber(
         if (!sessionPcm) {
             sessionPcm = true
             onState(State.LISTENING)
-        }
-
-        if (mono.size < frames) mono = FloatArray(frames)
-        if (isFloat) {
-            val floats = buffer.asFloatBuffer()
-            for (frame in 0 until frames) {
-                var sum = 0f
-                for (channel in 0 until channelCount) sum += floats.get()
-                mono[frame] = sum / channelCount
-            }
-        } else {
-            val shorts = buffer.asShortBuffer()
-            for (frame in 0 until frames) {
-                var sum = 0f
-                for (channel in 0 until channelCount) sum += shorts.get() / 32768f
-                mono[frame] = sum / channelCount
-            }
         }
 
         val converter = synchronized(audioLock) {
@@ -481,7 +463,6 @@ class LiveTranscriber(
 
     companion object {
         const val SAMPLE_RATE = 16_000
-        const val ENCODING_PCM_FLOAT = 4
         private const val TAG = "LocalSTT"
         private const val FIRST_WINDOW_MS = 4_000L
         private const val WINDOW_MS = 4_000L
