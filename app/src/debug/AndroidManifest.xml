@@ -21,5 +21,15 @@
             android:exported="true"
             android:label="Feed debug"
             android:theme="@style/Theme.Calculator" />
+        <activity
+            android:name=".DebugHomeActivity"
+            android:exported="true"
+            android:label="Home debug"
+            android:theme="@style/Theme.Calculator" />
+        <activity
+            android:name=".DebugSearchActivity"
+            android:exported="true"
+            android:label="Search debug"
+            android:theme="@style/Theme.Calculator" />
     </application>
 </manifest>

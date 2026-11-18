@@ -87,7 +87,6 @@ fun HomeScreen(
     var tagFilter by remember { mutableStateOf<String?>(null) }
     var flavorFilter by remember { mutableStateOf<HentaiFlavor?>(null) }
     var releaseFilter by remember { mutableStateOf<String?>(null) }
-    var lastPrefetched by remember { mutableStateOf<String?>(null) }
     var sourceFilter by remember { mutableStateOf<String?>(null) }
     var failures by remember { mutableStateOf<List<String>>(emptyList()) }
     val gridState = rememberLazyGridState()
@@ -170,20 +169,18 @@ fun HomeScreen(
         load(1, true)
     }
 
-    // Artwork for whatever just landed, plus the hero's detail page so the first
-    // Play tap starts immediately.
-    LaunchedEffect(items.firstOrNull()?.key, groups.firstOrNull()?.key) {
+    // Artwork for whatever just landed, plus the first few detail pages so the
+    // next taps open immediately instead of waiting for a source round-trip.
+    LaunchedEffect(items.take(3).map { it.key }, groups.firstOrNull()?.key) {
         val thumbs = items.ifEmpty { groups.flatMap { it.videos } }
         if (thumbs.isNotEmpty()) {
             com.simplecalculator.app.ui.ImageWarmup.prefetch(context, thumbs, limit = 12)
         }
-        items.firstOrNull()?.let { hero ->
-            if (hero.key != lastPrefetched) {
-                lastPrefetched = hero.key
-                withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    kotlinx.coroutines.delay(600)
-                    container.content.prefetchDetail(hero.key)
-                }
+        val targets = items.take(3).map { it.key }
+        for ((index, key) in targets.withIndex()) {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                kotlinx.coroutines.delay(600L + index * 800L)
+                container.content.prefetchDetail(key)
             }
         }
     }

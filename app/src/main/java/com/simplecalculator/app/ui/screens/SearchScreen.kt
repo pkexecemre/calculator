@@ -46,6 +46,8 @@ import com.simplecalculator.app.R
 import com.simplecalculator.app.data.source.Category
 import com.simplecalculator.app.data.source.HentaiFlavor
 import com.simplecalculator.app.data.source.SeriesGroup
+import com.simplecalculator.app.data.source.SeriesGrouping
+import com.simplecalculator.app.data.source.SeriesStore
 import com.simplecalculator.app.data.source.VideoSummary
 import com.simplecalculator.app.ui.EmptyState
 import com.simplecalculator.app.ui.FilterChipRow
@@ -76,6 +78,7 @@ fun SearchScreen(
     var searched by remember { mutableStateOf(false) }
     var failures by remember { mutableStateOf<List<String>>(emptyList()) }
     var page by remember { mutableStateOf(1) }
+    var searchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val prefs = remember {
         container.appContext.getSharedPreferences("search_state", android.content.Context.MODE_PRIVATE)
     }
@@ -94,39 +97,68 @@ fun SearchScreen(
 
     fun run(nextPage: Int) {
         if (query.isBlank() || loading) return
-        if (nextPage == 1) rememberQuery(query)
-        scope.launch {
+        if (nextPage == 1) {
+            rememberQuery(query)
+            items = emptyList()
+            groups = emptyList()
+            searched = false
+        }
+        searchJob?.cancel()
+        searchJob = scope.launch {
             loading = true
             page = nextPage
-            runCatching {
-                if (category == Category.HENTAI) {
-                    Pair<List<SeriesGroup>, List<VideoSummary>>(
-                        container.content.searchGroups(category, query.trim(), nextPage, sourceFilter, tagFilter),
-                        emptyList()
-                    )
-                } else {
-                    Pair<List<SeriesGroup>, List<VideoSummary>>(
-                        emptyList(),
-                        container.content.search(category, query.trim(), nextPage, sourceFilter, tagFilter)
-                    )
+            try {
+                // Every category streams: the first source's hits render while
+                // the rest are still loading. Hentai just groups each update.
+                container.content.searchStream(
+                    category, query.trim(), nextPage, sourceFilter, tagFilter
+                ).collect { update ->
+                    if (category == Category.HENTAI) {
+                        val fresh = SeriesStore.putAll(SeriesGrouping.group(update.items))
+                        val merged = if (nextPage == 1) {
+                            fresh
+                        } else {
+                            (groups + fresh).distinctBy { it.key }
+                        }
+                        groups = if (flavorFilter != null) {
+                            merged.filter { group ->
+                                group.videos.any { it.flavor == flavorFilter }
+                            }
+                        } else {
+                            merged
+                        }
+                        items = emptyList()
+                    } else {
+                        items = if (nextPage == 1) {
+                            update.items
+                        } else {
+                            (items + update.items).distinctBy { it.key }
+                        }
+                    }
+                    failures = update.failures
+                    if (items.isNotEmpty() || groups.isNotEmpty() || update.done) {
+                        searched = true
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                searched = true
+            } finally {
+                // Only the current job may clear the loading flag; a canceled
+                // job must not overwrite the replacement search's state.
+                if (searchJob == kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]) {
+                    loading = false
+                    searchJob = null
                 }
             }
-                .onSuccess { (newGroups, videos) ->
-                    val merged = if (nextPage == 1) newGroups else (groups + newGroups).distinctBy { it.key }
-                    groups = if (category == Category.HENTAI && flavorFilter != null) {
-                        merged.filter { group -> group.videos.any { it.flavor == flavorFilter } }
-                    } else {
-                        merged
-                    }
-                    items = if (nextPage == 1) videos else (items + videos).distinctBy { it.key }
-                    searched = true
-                }
-            failures = container.content.lastFailures
-            loading = false
         }
     }
 
     androidx.compose.runtime.LaunchedEffect(category) {
+        searchJob?.cancel()
+        searchJob = null
+        loading = false
         items = emptyList()
         groups = emptyList()
         flavorFilter = null

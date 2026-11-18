@@ -7,6 +7,7 @@ import com.simplecalculator.app.data.db.VideoEntity
 import com.simplecalculator.app.data.net.NetworkErrors
 import com.simplecalculator.app.data.rank.Ranker
 import com.simplecalculator.app.data.source.Category
+import com.simplecalculator.app.data.source.CommentItem
 import com.simplecalculator.app.data.source.ContentFilters
 import com.simplecalculator.app.data.source.hentai.AkiHSource
 import com.simplecalculator.app.data.source.ListingKind
@@ -104,6 +105,13 @@ class ContentRepository(
         val done: Boolean
     )
 
+    /** Same idea for search: cards appear as each source answers. */
+    data class SearchUpdate(
+        val items: List<VideoSummary>,
+        val failures: List<String>,
+        val done: Boolean
+    )
+
     /**
      * Feed that renders source by source instead of waiting for the slowest one.
      * On a slow connection the first cards show up in well under a second.
@@ -131,7 +139,13 @@ class ContentRepository(
         coroutineScope {
             active.forEach { source ->
                 launch(Dispatchers.IO) {
+                    val sourceStarted = System.nanoTime()
                     val items = fetchOne(source, kind, page, tagQuery, failures)
+                    android.util.Log.d(
+                        "FeedPerf",
+                        "stream " + source.id + " items=" + items.size +
+                            " " + ((System.nanoTime() - sourceStarted) / 1_000_000) + "ms"
+                    )
                     if (items.isNotEmpty()) {
                         acc.addAll(items)
                         // The first cards stream in before ranking; apply the
@@ -314,14 +328,14 @@ class ContentRepository(
             .also { result -> android.util.Log.e("ContentRepo", "cachedFeed(${category.name}) -> ${result.getOrNull()?.size ?: 0}") }
             .getOrDefault(emptyList())
 
-    suspend fun search(
+    private fun filterSearchPool(
+        items: List<VideoSummary>,
         category: Category,
         query: String,
-        page: Int,
-        sourceFilter: String? = null,
-        tagFilter: String? = null
+        tagFilter: String?,
+        sourceFilter: String?
     ): List<VideoSummary> {
-        var pool = fetchAll(sources.byCategory(category), ListingKind.SEARCH, page, query)
+        var pool = items
         if (sourceFilter != null) pool = pool.filter { it.sourceId == sourceFilter }
         if (tagFilter != null) {
             // Videos store canonical ids, the chip carries an id, and titles use
@@ -337,10 +351,98 @@ class ContentRepository(
         } else {
             pool
         }
-        val finalPool = (if (sourceFilter != null) expandCards(relevant) else relevant).withoutHidden()
+        val visible = relevant.withoutHidden()
+        // A query like "SSIS" returns the same catalogue release from several
+        // mirrors. Keep one card per cut instead of repeating it.
+        return if (category == Category.JAV) {
+            visible.distinctBy { ContentFilters.releaseIdentity(it.title, it.vkey) ?: it.key }
+        } else {
+            visible.distinctBy { it.key }
+        }
+    }
+
+    private val searchCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<VideoSummary>>>()
+
+    private fun searchKey(
+        category: Category,
+        query: String,
+        page: Int,
+        sourceFilter: String?,
+        tagFilter: String?
+    ) = category.name + "|" + page + "|" + query.trim().lowercase() + "|" +
+        sourceFilter.orEmpty() + "|" + tagFilter.orEmpty()
+
+    suspend fun search(
+        category: Category,
+        query: String,
+        page: Int,
+        sourceFilter: String? = null,
+        tagFilter: String? = null
+    ): List<VideoSummary> {
+        val key = searchKey(category, query, page, sourceFilter, tagFilter)
+        searchCache[key]?.let { (at, items) ->
+            if (System.currentTimeMillis() - at < SEARCH_TTL_MS) return items
+        }
+        val raw = fetchAll(sources.byCategory(category), ListingKind.SEARCH, page, query)
+        val pool = filterSearchPool(raw, category, query, tagFilter, sourceFilter)
+        val finalPool = if (sourceFilter != null) expandCards(pool) else pool
+        if (finalPool.isNotEmpty()) {
+            if (searchCache.size > 24) searchCache.clear()
+            searchCache[key] = System.currentTimeMillis() to finalPool
+        }
         upsertAll(finalPool)
         return finalPool
     }
+
+    /**
+     * Search that renders source by source instead of making the user wait for
+     * the slowest site. Same filtering rules as [search], with a final ranked-by-
+     * arrival list and one last update for pagination/expansion.
+     */
+    fun searchStream(
+        category: Category,
+        query: String,
+        page: Int = 1,
+        sourceFilter: String? = null,
+        tagFilter: String? = null
+    ): Flow<SearchUpdate> = channelFlow {
+        val cacheKey = searchKey(category, query, page, sourceFilter, tagFilter)
+        searchCache[cacheKey]?.let { (at, cached) ->
+            if (System.currentTimeMillis() - at < SEARCH_TTL_MS) {
+                lastFailures = emptyList()
+                send(SearchUpdate(cached, emptyList(), done = true))
+                return@channelFlow
+            }
+        }
+        val active = sources.byCategory(category)
+            .filter { sourceFilter == null || it.id == sourceFilter }
+        val acc = Collections.synchronizedList(ArrayList<VideoSummary>())
+        val failures = Collections.synchronizedList(ArrayList<String>())
+
+        coroutineScope {
+            active.forEach { source ->
+                launch(Dispatchers.IO) {
+                    val items = fetchOne(source, ListingKind.SEARCH, page, query, failures)
+                    if (items.isNotEmpty()) {
+                        acc.addAll(items)
+                        val preview = filterSearchPool(acc.toList(), category, query, tagFilter, sourceFilter)
+                        lastFailures = failures.toList().sorted()
+                        send(SearchUpdate(preview, lastFailures, done = false))
+                    }
+                }
+            }
+        }
+
+        val pool = filterSearchPool(acc.toList(), category, query, tagFilter, sourceFilter)
+        val finalPool = if (sourceFilter != null) expandCards(pool) else pool
+        if (finalPool.isNotEmpty()) {
+            if (searchCache.size > 24) searchCache.clear()
+            searchCache[cacheKey] = System.currentTimeMillis() to finalPool
+        }
+        upsertAll(finalPool)
+        lastFailures = failures.toList().sorted()
+        send(SearchUpdate(finalPool, lastFailures, done = true))
+    }.flowOn(Dispatchers.Default)
 
     /**
      * Opening a series: pull every source for the same title and expand series
@@ -403,11 +505,17 @@ class ContentRepository(
                     }
                     else -> {
                         sourceGate.acquire()
+                        val started = System.nanoTime()
                         try {
                             val items = withTimeout(SOURCE_TIMEOUT_MS) {
                                 source.listing(kind, page, query, null)
                             }
                             health.recordSuccess(source.id)
+                            android.util.Log.d(
+                                "FeedPerf",
+                                "all " + source.id + " items=" + items.size +
+                                    " " + ((System.nanoTime() - started) / 1_000_000) + "ms"
+                            )
                             items
                         } catch (e: CancellationException) {
                             if (e is TimeoutCancellationException) {
@@ -611,13 +719,38 @@ class ContentRepository(
         }
     }
 
-    suspend fun comments(vkey: String, sourceId: String, commentsUrl: String?, offset: Int) =
-        sources.byId(sourceId)?.comments(vkey, commentsUrl, offset) ?: emptyList()
+    private val commentsCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<CommentItem>>>()
+    private val relatedCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<VideoSummary>>>()
+
+    suspend fun comments(vkey: String, sourceId: String, commentsUrl: String?, offset: Int): List<CommentItem> {
+        val cacheKey = sourceId + ":" + vkey + ":" + offset
+        val cached = commentsCache[cacheKey]
+        if (cached != null && System.currentTimeMillis() - cached.first < COMMENTS_TTL_MS) {
+            return cached.second
+        }
+        val items = runCatching {
+            sources.byId(sourceId)?.comments(vkey, commentsUrl, offset) ?: emptyList()
+        }.getOrDefault(emptyList())
+        if (items.isNotEmpty() && offset == 0) {
+            if (commentsCache.size > 40) commentsCache.clear()
+            commentsCache[cacheKey] = System.currentTimeMillis() to items
+        }
+        return items
+    }
 
     suspend fun related(vkey: String, sourceId: String, relatedUrl: String?): List<VideoSummary> {
+        val cacheKey = sourceId + ":" + vkey
+        val cached = relatedCache[cacheKey]
+        if (cached != null && System.currentTimeMillis() - cached.first < RELATED_TTL_MS) {
+            return cached.second
+        }
         val items = runCatching {
             sources.byId(sourceId)?.related(vkey, relatedUrl) ?: emptyList()
         }.getOrDefault(emptyList())
+        if (items.isNotEmpty()) {
+            if (relatedCache.size > 40) relatedCache.clear()
+            relatedCache[cacheKey] = System.currentTimeMillis() to items
+        }
         // Anything the UI can navigate to must exist in the cache, otherwise the
         // player opens with no title and no metadata.
         upsertAll(items)
@@ -678,6 +811,9 @@ class ContentRepository(
         private const val MAX_PARALLEL_SOURCES = 6
         private const val DETAIL_TTL_MS = 10 * 60 * 1000L
         private const val PAGE_TTL_MS = 3 * 60 * 1000L
+        private const val COMMENTS_TTL_MS = 2 * 60 * 1000L
+        private const val RELATED_TTL_MS = 5 * 60 * 1000L
+        private const val SEARCH_TTL_MS = 2 * 60 * 1000L
         const val RELEASE_UNCENSORED = "uncensored"
         const val RELEASE_SUBTITLED = "subtitled"
     }

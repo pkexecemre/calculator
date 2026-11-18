@@ -22,6 +22,9 @@ object ImageWarmup {
             .forEach { url ->
                 val request = ImageRequest.Builder(context)
                     .data(url)
+                    // The feed shows these in a two-up grid; decoding the
+                    // original poster for a prefetch wastes a lot of memory.
+                    .size(720, 960)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
                     .build()

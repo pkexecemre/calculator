@@ -115,6 +115,18 @@ class ContentPolicyTest {
     }
 
     @Test
+    fun releaseIdentityKeepsCutsApart() {
+        val normal = ContentFilters.releaseIdentity("SSIS-960 タイトル", "ssis-960")
+        val mirror = ContentFilters.releaseIdentity("SSIS-960 タイトル", "ssis-960")
+        assertEquals(normal, mirror)
+        val subtitled = ContentFilters.releaseIdentity(
+            "SSIS-960 タイトル english subtitle", "ssis-960-english-subtitle"
+        )
+        assertTrue(normal != subtitled)
+        assertTrue(ContentFilters.releaseIdentity("no code here", "free-1") == null)
+    }
+
+    @Test
     fun tlsTrustErrorsBecomeActionable() {
         val root = CertPathValidatorException(
             "Trust anchor for certification path not found."

@@ -36,12 +36,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.simplecalculator.app.Container
 import com.simplecalculator.app.R
 import com.simplecalculator.app.core.formatDuration
@@ -127,13 +129,20 @@ fun PosterThumb(
                 modifier = Modifier.align(Alignment.Center).size(36.dp)
             )
         } else {
+            // The bleed exists to be blurred: decoding a 96 px copy is much
+            // cheaper than decoding the poster twice, and the visual result is
+            // indistinguishable after the blur.
+            val bleed = ImageRequest.Builder(LocalContext.current)
+                .data(source)
+                .size(96, 96)
+                .build()
             AsyncImage(
-                model = source,
+                model = bleed,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .matchParentSize()
-                    .blur(20.dp)
+                    .blur(10.dp)
                     .alpha(0.85f)
             )
             Box(

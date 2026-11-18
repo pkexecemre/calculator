@@ -29,6 +29,25 @@ object ContentFilters {
 
     fun isCjkTitle(title: String): Boolean = CJK.containsMatchIn(title)
 
+    /** The studio catalogue code (SSIS-123) if the title/slug carries one. */
+    fun productCode(title: String, vkey: String): String? =
+        PRODUCT_CODE.find(title)?.value?.uppercase()?.replace('_', '-')
+            ?: PRODUCT_CODE.find(vkey)?.value?.uppercase()?.replace('_', '-')
+
+    /**
+     * One identity per catalogue release, while still keeping subtitled and
+     * uncensored cuts distinct. Used to collapse the same release mirrored by
+     * several sources in search results.
+     */
+    fun releaseIdentity(title: String, vkey: String): String? {
+        val code = productCode(title, vkey) ?: return null
+        val flags = buildString {
+            if (JavTitles.isSubtitled(title, vkey)) append(":sub")
+            if (JavTitles.isUncensored(title, vkey)) append(":unc")
+        }
+        return code + flags
+    }
+
     /**
      * Applies the category policy to a merged pool. Explicit source selection
      * still wins: picking 141tube or Avgle shows their Japanese catalogue.

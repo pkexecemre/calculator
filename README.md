@@ -54,7 +54,10 @@ lockout. The app re-locks 90 seconds after it goes to the background.
   per-episode progress and offers a **Next** button for the first unwatched one.
 - Feed cards show a resume bar for anything partially watched, and the player
   announces “Resumed at mm:ss” with a one-tap **Start over**.
-- Search remembers your last ten queries as tappable chips.
+- Search remembers your last ten queries as tappable chips. Feeds and search
+  render source by source, so the first cards land before the slowest site
+  answers; searches are cached for two minutes and mirrored JAV catalogue
+  releases collapse into one card.
 - Long-press any card for quick actions: **Save to library** or **Hide from
   feed**. Hidden titles are filtered from every feed/search and can be restored
   from Settings.
@@ -181,7 +184,7 @@ lulustream are followed one level and unpacked the same way, which made JAV-NONI
 and JAV-FUN native as well — these hosts serve a JS-only page when the request
 carries a full browser `Accept` header, so embed fetches stay minimal.
 
-`./gradlew :app:testDebugUnitTest` runs **101 tests**: saved real/archived pages
+`./gradlew :app:testDebugUnitTest` runs **102 tests**: saved real/archived pages
 for all 23 sources (`LiveFixtureTest`), synthetic stream-extraction cases, the
 original parser fixtures, source-health behavior, calculator expressions and
 the feed mixer. A site change now fails a test instead of the UI.

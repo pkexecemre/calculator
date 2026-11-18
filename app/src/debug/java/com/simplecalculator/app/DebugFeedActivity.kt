@@ -58,20 +58,63 @@ class DebugFeedActivity : Activity() {
                 show(Category.LIVE, sourceFilter = null, limit = 24)
                 show(Category.JAV, sourceFilter = null, limit = 30)
                 show(Category.LIVE, sourceFilter = "avg", limit = 10)
+                showSearch("SSIS")
+                showSearch("SSIS")
             }
+        }
+    }
+
+    private suspend fun showSearch(query: String) {
+        append("== SEARCH ${query} ==")
+        val started = System.currentTimeMillis()
+        var firstMs = -1L
+        var updates = 0
+        var finalSize = 0
+        runCatching {
+            container.content.searchStream(Category.JAV, query).collect { update ->
+                updates++
+                if (firstMs < 0 && update.items.isNotEmpty()) {
+                    firstMs = System.currentTimeMillis() - started
+                }
+                if (update.done) {
+                    finalSize = update.items.size
+                    append(
+                        "search first=" + firstMs + "ms total=" +
+                            (System.currentTimeMillis() - started) + "ms updates=" +
+                            updates + " items=" + finalSize
+                    )
+                }
+            }
+        }.onFailure { append("search failed: " + it.message) }
+        if (firstMs < 0) {
+            append("search first=none total=" + (System.currentTimeMillis() - started) + "ms")
         }
     }
 
     private suspend fun show(category: Category, sourceFilter: String?, limit: Int) {
         append("== ${category.name} source=${sourceFilter ?: "all"} ==")
+        val started = System.currentTimeMillis()
         val items = runCatching { container.content.feed(category, 1, sourceFilter = sourceFilter) }
             .onFailure { append("feed failed: " + it.javaClass.simpleName + " " + it.message) }
             .getOrDefault(emptyList())
-        append("items=" + items.size)
+        append("items=" + items.size + " elapsed=" + (System.currentTimeMillis() - started) + "ms")
         val bySource = items.groupingBy { it.sourceId }.eachCount().entries
             .sortedByDescending { it.value }
             .joinToString(", ") { it.key + ":" + it.value }
         append("sources: " + bySource)
+        if (category == Category.JAV) {
+            val codes = items.mapNotNull { ContentFilters.productCode(it.title, it.vkey) }
+            val counts = codes.groupingBy { it }.eachCount()
+            val duplicates = counts.filter { it.value > 1 }
+            append(
+                "codes=" + codes.size + " unique=" + counts.size +
+                    " duplicateCodes=" + duplicates.size +
+                    " duplicateItems=" + duplicates.values.sum()
+            )
+            duplicates.entries.sortedByDescending { it.value }.take(8).forEach { entry ->
+                append("  code " + entry.key + " x" + entry.value)
+            }
+        }
         for (video in items.take(limit)) {
             val bad = if (category == Category.JAV) {
                 ContentFilters.isLowQuality(video.title, video.vkey)
