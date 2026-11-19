@@ -154,6 +154,8 @@ fun PlayerScreen(
     var captionText by remember { mutableStateOf<String?>(null) }
     var captionSerial by remember { mutableStateOf(0) }
     var lastCueAt by remember { mutableStateOf(0L) }
+    var captionHoldOverride by remember { mutableStateOf<Long?>(null) }
+    var lastShownCueStart by remember { mutableStateOf(Long.MIN_VALUE) }
     val positionRef = remember { java.util.concurrent.atomic.AtomicLong(0L) }
     var subtitleChoice by remember { mutableStateOf("off") }
     var loadingSubs by remember { mutableStateOf(false) }
@@ -393,7 +395,10 @@ fun PlayerScreen(
     }
 
     // Live speech-to-text: tap the audio that is playing and caption it locally.
-    androidx.compose.runtime.DisposableEffect(liveSubs, videoKey, entity?.category) {
+    var lookaheadCues by remember { mutableStateOf<List<com.simplecalculator.app.data.stt.Caption>>(emptyList()) }
+    var lookaheadState by remember { mutableStateOf(com.simplecalculator.app.data.stt.lookahead.LookaheadTranscriber.State.IDLE) }
+
+    androidx.compose.runtime.DisposableEffect(liveSubs, videoKey, entity?.category, playUri) {
         captionText = null
         captionSerial += 1
         lastCueAt = 0L
@@ -412,6 +417,39 @@ fun PlayerScreen(
                 "JAV", "HENTAI" -> "ja"
                 else -> "en"
             }
+            val streamUrl = playUri
+            val video = entity
+            android.util.Log.i("CaptionLane", "url=" + (streamUrl != null) + " video=" + (video != null))
+            if (streamUrl != null && video != null) {
+                // The look-ahead player decodes the same stream far faster than
+                // real time, so cues exist before the playhead reaches them.
+                container.lookahead.transcriber.onCues = { cues ->
+                    // Written from the transcription thread; hop to the UI thread
+                    // so Compose sees the change immediately.
+                    scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                        lookaheadCues = cues
+                        lastCueAt = android.os.SystemClock.elapsedRealtime()
+                    }
+                }
+                container.lookahead.transcriber.onState = { state -> lookaheadState = state }
+                // positionRef survives navigation between videos; the decoder
+                // must start where *this* item is actually playing.
+                val livePosition = player?.currentPosition ?: 0L
+                val duration = player?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
+                val startMs = livePosition.coerceIn(0L, (duration - 5_000L).coerceAtLeast(0L))
+                container.lookahead.start(
+                    streamUrl = streamUrl,
+                    startMs = startMs,
+                    videoKey = video.key,
+                    displayLanguage = if (languageHint == "en") "en" else "ja",
+                    sourceLanguage = languageHint
+                )
+                onDispose {
+                    container.lookahead.transcriber.onCues = {}
+                    container.lookahead.transcriber.onState = {}
+                    container.lookahead.stop()
+                }
+            } else {
             container.transcriber.captions = { cues: List<com.simplecalculator.app.data.stt.Caption> ->
                 // One window can contain several sentences: show all of them,
                 // not just the last cue, or most of the speech is silently lost.
@@ -460,6 +498,7 @@ fun PlayerScreen(
                 container.transcriber.onState = {}
                 container.transcriber.stop()
             }
+            }
         }
     }
 
@@ -479,6 +518,31 @@ fun PlayerScreen(
             val now = android.os.SystemClock.elapsedRealtime()
             val current = player
             if (current == null || !current.isPlaying) {
+                startedAt = now
+                continue
+            }
+            // The look-ahead lane is the fast path, but it must never leave the
+            // viewer without captions: if it has produced nothing after 12 s,
+            // fall back to the real-time tap for this playback.
+            if (attempts == 0 && container.lookahead.enabled &&
+                container.lookahead.transcriber.producedUntil() <= 0L &&
+                now - startedAt > 12_000L &&
+                now - lastCueAt > 12_000L
+            ) {
+                android.util.Log.w("CaptionHeal", "look-ahead produced nothing; falling back to the tap")
+                container.lookahead.stop()
+                com.simplecalculator.app.player.PcmBridge.listener = { buffer, rate, channels, encoding ->
+                    container.transcriber.onPcm(buffer, rate, channels, encoding, positionRef.get())
+                }
+                container.transcriber.captions = { cues ->
+                    val text = cues.joinToString(" ") { it.text }.trim()
+                    if (text.isNotEmpty()) {
+                        captionText = text
+                        captionSerial += 1
+                        lastCueAt = android.os.SystemClock.elapsedRealtime()
+                    }
+                }
+                container.transcriber.start(languageHint = languageHint, cacheKey = entity?.key)
                 startedAt = now
                 continue
             }
@@ -509,7 +573,7 @@ fun PlayerScreen(
     // screen until the next window finishes.
     androidx.compose.runtime.LaunchedEffect(captionSerial) {
         val text = captionText ?: return@LaunchedEffect
-        kotlinx.coroutines.delay(captionHoldMs(text))
+        kotlinx.coroutines.delay(captionHoldOverride ?: captionHoldMs(text))
         captionText = null
     }
 
@@ -541,6 +605,31 @@ fun PlayerScreen(
             // Lets the transcript cache surface cues on a seek instead of
             // re-running Whisper over audio it has already seen.
             container.transcriber.onPosition(positionMs)
+            if (liveSubs != "off" && lookaheadCues.isNotEmpty()) {
+                container.lookahead.pace(positionMs)
+                val cue = lookaheadCues.lastOrNull {
+                    positionMs >= it.startMs - 200L && positionMs <= it.endMs + 400L
+                }
+                if (cue != null && cue.startMs != lastShownCueStart) {
+                    lastShownCueStart = cue.startMs
+                    captionHoldOverride = (cue.endMs - positionMs + 350L).coerceIn(1_200L, 12_000L)
+                    captionText = cue.text
+                    captionSerial += 1
+                    lastCueAt = android.os.SystemClock.elapsedRealtime()
+                    if (liveSubs == "tr") {
+                        val serial = captionSerial
+                        val text = cue.text
+                        scope.launch {
+                            val translated = runCatching {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    container.translator.translateCaption(text, "tr")
+                                }
+                            }.getOrNull()
+                            if (serial == captionSerial && translated != null) captionText = translated
+                        }
+                    }
+                }
+            }
             if (!autoplayFired && exo.playbackState == Player.STATE_ENDED &&
                 autoplay && related.isNotEmpty()
             ) {

@@ -142,6 +142,12 @@ class Container(context: Context) {
 
     val transcriber: LiveTranscriber = LiveTranscriber(modelStore, cueCache)
 
+    /** Decodes ahead of playback so captions are ready before they are spoken. */
+    val lookahead: com.simplecalculator.app.data.stt.lookahead.LookaheadManager =
+        com.simplecalculator.app.data.stt.lookahead.LookaheadManager(
+            appContext, http, mediaHeaders, modelStore, cueCache
+        )
+
     val sources: SourceRegistry = SourceRegistry(
         buildList {
             // LIVE — primary stays first because follows/watch affinity use it.
