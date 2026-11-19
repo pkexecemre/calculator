@@ -137,7 +137,10 @@ class Container(context: Context) {
 
     val modelStore: ModelStore = ModelStore(appContext, http)
 
-    val transcriber: LiveTranscriber = LiveTranscriber(modelStore)
+    val cueCache: com.simplecalculator.app.data.stt.CueCache =
+        com.simplecalculator.app.data.stt.RoomCueCache(db)
+
+    val transcriber: LiveTranscriber = LiveTranscriber(modelStore, cueCache)
 
     val sources: SourceRegistry = SourceRegistry(
         buildList {

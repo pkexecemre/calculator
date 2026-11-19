@@ -449,7 +449,11 @@ fun PlayerScreen(
                     positionRef.get()
                 )
             }
-            container.transcriber.start(languageHint)
+            container.transcriber.start(
+                languageHint = languageHint,
+                cacheKey = entity?.key,
+                cacheLang = if (languageHint == "en") "en" else "ja"
+            )
             onDispose {
                 com.simplecalculator.app.player.PcmBridge.listener = null
                 container.transcriber.captions = {}
@@ -491,7 +495,12 @@ fun PlayerScreen(
             attempts++
             android.util.Log.i("CaptionHeal", "retrying with $model after ${now - lastActivity}ms without a cue")
             container.transcriber.stop()
-            container.transcriber.start(languageHint, model)
+            container.transcriber.start(
+                languageHint = languageHint,
+                modelId = model,
+                cacheKey = entity?.key,
+                cacheLang = if (languageHint == "en") "en" else "ja"
+            )
             startedAt = now
         }
     }
@@ -529,6 +538,9 @@ fun PlayerScreen(
             positionRef.set(positionMs)
             durationMs = exo.duration.coerceAtLeast(0L)
             playing = exo.isPlaying
+            // Lets the transcript cache surface cues on a seek instead of
+            // re-running Whisper over audio it has already seen.
+            container.transcriber.onPosition(positionMs)
             if (!autoplayFired && exo.playbackState == Player.STATE_ENDED &&
                 autoplay && related.isNotEmpty()
             ) {

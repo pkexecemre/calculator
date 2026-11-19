@@ -61,6 +61,19 @@ data class FavoriteEntity(
     val addedAt: Long
 )
 
+@Entity(
+    tableName = "stt_cues",
+    primaryKeys = ["videoKey", "lang", "startMs"]
+)
+data class SttCueEntity(
+    val videoKey: String,
+    val lang: String,
+    val startMs: Long,
+    val endMs: Long,
+    val text: String,
+    val createdAt: Long
+)
+
 @Entity(tableName = "downloads")
 data class DownloadEntity(
     @PrimaryKey val key: String,

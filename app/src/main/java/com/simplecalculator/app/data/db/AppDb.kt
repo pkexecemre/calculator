@@ -14,9 +14,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         EventEntity::class,
         DownloadEntity::class,
         HistoryEntity::class,
-        FavoriteEntity::class
+        FavoriteEntity::class,
+        SttCueEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -27,6 +28,7 @@ abstract class AppDb : RoomDatabase() {
     abstract fun downloads(): DownloadDao
     abstract fun history(): HistoryDao
     abstract fun favorites(): FavoriteDao
+    abstract fun sttCues(): SttCueDao
 
     companion object {
         fun build(context: Context): AppDb = Room.databaseBuilder(

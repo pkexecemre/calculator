@@ -96,6 +96,19 @@ interface FavoriteDao {
 }
 
 @Dao
+interface SttCueDao {
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putAll(items: List<SttCueEntity>)
+
+    @Query("SELECT * FROM stt_cues WHERE videoKey = :key AND lang = :lang ORDER BY startMs")
+    suspend fun forVideo(key: String, lang: String): List<SttCueEntity>
+
+    @Query("DELETE FROM stt_cues WHERE videoKey = :key")
+    suspend fun clear(key: String)
+}
+
+@Dao
 interface DownloadDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

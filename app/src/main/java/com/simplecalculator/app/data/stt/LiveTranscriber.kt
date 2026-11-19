@@ -27,7 +27,8 @@ import java.util.concurrent.atomic.AtomicLong
  * minutes behind.
  */
 class LiveTranscriber(
-    private val modelStore: ModelStore
+    private val modelStore: ModelStore,
+    private val cache: CueCache = CueCache.None
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -39,7 +40,12 @@ class LiveTranscriber(
     private val epoch = AtomicLong(0)
     private val window = WindowBuffer(SAMPLE_RATE, FIRST_WINDOW_MS, WINDOW_MS, OVERLAP_MS)
     private val assembler = CaptionAssembler()
-    private val speedGuard = SpeedGuard()
+    // Demote on the very first slow window: with RTF above ~1 the pipeline can
+    // never catch up, and waiting for a second strike costs another 10 s.
+    private val speedGuard = SpeedGuard(limit = 0.95f, strikes = 1)
+    private var fastWindows = 0
+    private var upgraded = false
+    private var demotions = 0
     private val audioLock = Any()
 
     private var worker: Job? = null
@@ -63,6 +69,11 @@ class LiveTranscriber(
     @Volatile private var sawPcm = false
     @Volatile private var sessionPcm = false
     @Volatile private var sessionCue = false
+    // Transcripts already paid for by an earlier watch of this video.
+    @Volatile private var cachedCues: List<Caption> = emptyList()
+    @Volatile private var cachedRanges: List<LongRange> = emptyList()
+    private var cacheKey: String? = null
+    private var cacheLang: String = "en"
 
     var captions: (List<Caption>) -> Unit = {}
     var onState: (State) -> Unit = {}
@@ -74,7 +85,28 @@ class LiveTranscriber(
      * English is transcribed; other languages are translated to English.
      * Null lets Whisper detect the language, which is slower.
      */
-    fun start(languageHint: String? = null, modelId: String? = null) {
+    fun start(
+        languageHint: String? = null,
+        modelId: String? = null,
+        cacheKey: String? = null,
+        cacheLang: String? = null
+    ) {
+        this.cacheKey = cacheKey
+        this.cacheLang = cacheLang?.takeIf { it.isNotBlank() } ?: "en"
+        cachedCues = emptyList()
+        cachedRanges = emptyList()
+        if (cacheKey != null) {
+            scope.launch {
+                val loaded = runCatching { cache.load(cacheKey, this@LiveTranscriber.cacheLang) }
+                    .getOrDefault(emptyList())
+                if (loaded.isEmpty() || cacheKey != this@LiveTranscriber.cacheKey) return@launch
+                cachedCues = loaded
+                cachedRanges = toRanges(loaded)
+                // A seek into an already transcribed stretch should show text
+                // immediately instead of waiting for the next window.
+                emitCachedAt(lastPositionMs)
+            }
+        }
         this.languageHint = languageHint?.trim()?.lowercase()?.takeIf { it != "auto" && it.isNotEmpty() }
         this.requestedModelId = modelId
         flushJob?.cancel()
@@ -160,7 +192,7 @@ class LiveTranscriber(
         // hold hundreds of megabytes for the rest of the session.
         idleUnload?.cancel()
         idleUnload = scope.launch {
-            delay(45_000L)
+            delay(300_000L)
             if (!ready.get()) {
                 gate.withLock { WhisperBridge.nativeFree() }
                 Log.i(TAG, "unloaded idle model")
@@ -226,6 +258,10 @@ class LiveTranscriber(
             window.append(resampled, outCount)
             while (true) {
                 val next = window.poll() ?: break
+                if (coveredByCache(next.startMs, next.endMs)) {
+                    Log.d(TAG, "cache hit window")
+                    continue
+                }
                 if (next.rms < SILENCE_RMS) {
                     Log.d(TAG, "skip silence window cut=${next.cutMs}ms rms=${next.rms}")
                     continue
@@ -268,6 +304,54 @@ class LiveTranscriber(
         )
     }
 
+    /**
+     * Called as playback advances. Cached cues are shown from the transcript
+     * cache without any inference, which is what makes seeking back instant.
+     */
+    fun onPosition(positionMs: Long) {
+        lastPositionMs = positionMs
+        if (cachedCues.isNotEmpty()) emitCachedAt(positionMs)
+    }
+
+    private var lastEmitMs = Long.MIN_VALUE
+
+    private fun emitCachedAt(positionMs: Long) {
+        if (cachedCues.isEmpty()) return
+        val window = cachedCues.filter { positionMs >= it.startMs - 250L && positionMs <= it.endMs + 400L }
+        if (window.isEmpty()) return
+        val key = window.first().startMs
+        if (key == lastEmitMs) return
+        lastEmitMs = key
+        captions(window)
+    }
+
+    private fun toRanges(cues: List<Caption>): List<LongRange> {
+        if (cues.isEmpty()) return emptyList()
+        val sorted = cues.sortedBy { it.startMs }
+        val out = ArrayList<LongRange>()
+        var start = sorted.first().startMs
+        var end = sorted.first().endMs
+        for (cue in sorted.drop(1)) {
+            if (cue.startMs <= end + 500L) {
+                end = maxOf(end, cue.endMs)
+            } else {
+                out.add(start until end)
+                start = cue.startMs
+                end = cue.endMs
+            }
+        }
+        out.add(start until end)
+        return out
+    }
+
+    private fun coveredByCache(startMs: Long, endMs: Long): Boolean {
+        if (cachedRanges.isEmpty()) return false
+        val from = startMs + 250L
+        val to = endMs - 250L
+        if (to <= from) return false
+        return cachedRanges.any { it.first <= from && it.last >= to }
+    }
+
     /** A seek invalidates buffered audio and every result still in flight. */
     fun onSeek(positionMs: Long) {
         flushJob?.cancel()
@@ -284,11 +368,37 @@ class LiveTranscriber(
         Log.i(TAG, "seek to ${positionMs}ms")
     }
 
+    /** Newly transcribed cues join the cache so a rewatch is free. */
+    private fun remember(cues: List<Caption>) {
+        val key = cacheKey ?: return
+        val merged = (cachedCues + cues).sortedBy { it.startMs }.distinctBy { it.startMs }
+        cachedCues = merged
+        cachedRanges = toRanges(merged)
+        scope.launch { runCatching { cache.save(key, cacheLang, cues) } }
+    }
+
     private suspend fun loadModel(): SttModel? {
         modelStore.ensureBundled()
-        val requested = requestedModelId
+        val requested0 = requestedModelId
             ?.let { ModelCatalog.byId(it) }
             ?: modelStore.selected()
+        // If this device already failed to keep up with the requested model,
+        // start the session on the fastest one instead of repeating the lag.
+        // Live captions open on the smallest ready model: waiting ~4 s for a
+        // bigger model's first window is what made captions feel late. If the
+        // device keeps up, the pipeline promotes itself after a few windows.
+        val measuredSlow = SttPerf.rtfFor(requested0.id) > 0.95f
+        val requested = if (requestedModelId == null || measuredSlow) {
+            fastestReadyModel(requested0) ?: requested0
+        } else {
+            requested0
+        }
+        if (requested.id != requested0.id) {
+            Log.i(
+                TAG,
+                "starting on " + requested.id + " (" + requested0.id + " is the quality tier)"
+            )
+        }
         val bundled = ModelCatalog.all.firstOrNull { it.bundled }
         // A selected model that cannot plausibly keep up must not make the
         // first caption take a minute. Base is always ready and fast enough for
@@ -322,7 +432,7 @@ class LiveTranscriber(
     private suspend fun consume() {
         while (true) {
             val chunk = queue.receiveCatching().getOrNull() ?: return
-            val model = loaded ?: continue
+            var model = loaded ?: continue
             if (!ready.get() || chunk.epoch != epoch.get()) continue
             // If the decoder is behind, transcribing very old audio only makes
             // the visible captions older. Drop the window and catch up instead.
@@ -358,10 +468,31 @@ class LiveTranscriber(
             val rtf = if (audioSec > 0f) inferMs / 1_000f / audioSec else 0f
             // Decide on a slow model before the latency drop: otherwise every
             // window is discarded and the fallback never gets a chance to run.
-            if (speedGuard.sample(rtf) && !fallbackDone && model.id != bundledModel()?.id) {
-                fallbackDone = true
-                switchToBundled(model, rtf)
-                if (!ready.get() || chunk.epoch != epoch.get()) continue
+            SttPerf.record(model.id, rtf)
+            if (speedGuard.sample(rtf) && demotions < 2) {
+                // Too slow for real time: drop to the smallest ready model.
+                val faster = fastestReadyModel(model)
+                if (faster != null) {
+                    demotions++
+                    Log.w(TAG, "demoting " + model.id + " rtf=" + "%.2f".format(rtf))
+                    switchModel(faster, model, rtf)
+                    if (!ready.get() || chunk.epoch != epoch.get()) continue
+                    model = loaded ?: model
+                }
+            } else if (rtf < 0.55f && !upgraded) {
+                // Plenty of headroom: step back up once for better text.
+                fastWindows++
+                if (fastWindows >= 6) {
+                    val better = betterReadyModel(model)
+                    if (better != null) {
+                        upgraded = true
+                        switchModel(better, model, rtf)
+                        if (!ready.get() || chunk.epoch != epoch.get()) continue
+                        model = loaded ?: model
+                    }
+                }
+            } else if (rtf >= 0.5f) {
+                fastWindows = 0
             }
             if (inferMs > MAX_RESULT_LATENCY_MS) {
                 Log.w(TAG, "drop slow result cut=${chunk.cutMs}ms infer=${inferMs}ms")
@@ -381,6 +512,7 @@ class LiveTranscriber(
                 continue
             }
             if (cues.isNotEmpty()) {
+                remember(cues)
                 if (!sessionCue) {
                     sessionCue = true
                     onState(State.LISTENING)
@@ -396,30 +528,37 @@ class LiveTranscriber(
         }
     }
 
-    /**
-     * A model larger than the phone can run in real time makes captions later
-     * and later. Fall back to the model shipped in the APK instead of showing
-     * nothing, and keep the choice for this playback session.
-     */
-    private suspend fun switchToBundled(current: SttModel, rtf: Float) {
-        val bundled = bundledModel() ?: return
-        if (!modelStore.isReady(bundled)) return
-        Log.w(TAG, "model ${current.id} is too slow (rtf=${"%.2f".format(rtf)}); switching to ${bundled.id}")
+    private fun bundledModel(): SttModel? = ModelCatalog.all.firstOrNull { it.bundled }
+
+    /** The smallest ready model that is allowed to run live captions. */
+    private fun fastestReadyModel(current: SttModel?): SttModel? =
+        ModelCatalog.all
+            .filter { it.liveFriendly && it.id != current?.id && modelStore.isReady(it) }
+            .filter { current == null || it.sizeMb < current.sizeMb }
+            .minByOrNull { it.sizeMb }
+
+    /** A step up in quality, only when the device proved it has the headroom. */
+    private fun betterReadyModel(current: SttModel?): SttModel? =
+        ModelCatalog.all
+            .filter { it.liveFriendly && it.id != current?.id && modelStore.isReady(it) }
+            .filter { it.sizeMb > (current?.sizeMb ?: 0) }
+            .minByOrNull { it.sizeMb }
+
+    private suspend fun switchModel(target: SttModel, current: SttModel?, rtf: Float) {
         val ok = gate.withLock {
-            WhisperBridge.nativeInit(modelStore.fileFor(bundled).absolutePath)
+            WhisperBridge.nativeInit(modelStore.fileFor(target).absolutePath)
         }
         if (ok) {
-            loaded = bundled
+            loaded = target
             speedGuard.reset()
-            Log.i(TAG, "fallback model ready: ${bundled.id}")
+            fastWindows = 0
+            Log.w(TAG, "model " + (current?.id) + " rtf=" + "%.2f".format(rtf) + " -> " + target.id)
         } else {
-            Log.e(TAG, "fallback model failed to load")
+            Log.e(TAG, "switch to " + target.id + " failed")
             ready.set(false)
             onState(State.UNAVAILABLE)
         }
     }
-
-    private fun bundledModel(): SttModel? = ModelCatalog.all.firstOrNull { it.bundled }
 
     private fun ageMs(chunk: Chunk): Long = (System.nanoTime() - chunk.createdAtNs) / 1_000_000
 
@@ -471,14 +610,19 @@ class LiveTranscriber(
     companion object {
         const val SAMPLE_RATE = 16_000
         private const val TAG = "LocalSTT"
-        private const val FIRST_WINDOW_MS = 4_000L
-        private const val WINDOW_MS = 4_000L
-        private const val OVERLAP_MS = 1_000L
+        // Shorter windows mean the first caption lands in ~2 s instead of ~5,
+        // and each inference covers less audio. 3 s + 0.7 s overlap keeps ~23 %
+        // redundancy, which Base still transcribes faster than real time.
+        private const val FIRST_WINDOW_MS = 2_000L
+        private const val WINDOW_MS = 3_000L
+        private const val OVERLAP_MS = 700L
         private const val SILENCE_RMS = 0.002f
         // A slow phone should still show a late caption instead of dropping
         // every result; the queue and age checks keep the backlog bounded.
-        private const val STALE_WINDOW_MS = 25_000L
-        private const val MAX_RESULT_LATENCY_MS = 20_000L
-        private val THREADS = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+        private const val STALE_WINDOW_MS = 8_000L
+        private const val MAX_RESULT_LATENCY_MS = 8_000L
+        // whisper.cpp keeps scaling to ~8 threads on x86 and ~6 on big cores;
+        // the old cap of 4 left a third of the machine idle on slow windows.
+        private val THREADS = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
     }
 }
