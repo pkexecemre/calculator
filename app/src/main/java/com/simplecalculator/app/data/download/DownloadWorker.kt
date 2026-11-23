@@ -36,7 +36,7 @@ class DownloadWorker(
 
         try {
             db.downloads().markRunning(key)
-            val detail = source.detail(vkey)
+            val detail = source.detail(vkey).detail
             val stream = pickStream(detail.streams, inputData.getString("qualityLabel"))
                 ?: throw IOException("no playable stream")
 

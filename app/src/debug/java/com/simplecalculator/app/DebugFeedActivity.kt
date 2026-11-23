@@ -10,15 +10,14 @@ import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.simplecalculator.app.data.source.Category
-import com.simplecalculator.app.data.source.ContentFilters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.Executors
 
 /**
- * Debug-only feed inspector: prints the merged Live and JAV feeds with their
- * source and title so the Western/quality policy can be checked on a device.
+ * Debug-only Pornhub inspector: prints the feed and a search result with
+ * timing and any error/stale state so the network path can be checked on a
+ * device without opening the vault.
  *
  * adb shell am start -n com.simplecalculator.app/.DebugFeedActivity
  */
@@ -54,78 +53,39 @@ class DebugFeedActivity : Activity() {
         container = (application as App).container
         worker.execute {
             runBlocking(Dispatchers.IO) {
-                container.health.resetAll(container.sources.all())
-                show(Category.LIVE, sourceFilter = null, limit = 24)
-                show(Category.JAV, sourceFilter = null, limit = 30)
-                show(Category.LIVE, sourceFilter = "avg", limit = 10)
-                showSearch("SSIS")
-                showSearch("SSIS")
+                showFeed(limit = 30)
+                showSearch("test")
             }
+        }
+    }
+
+    private suspend fun showFeed(limit: Int) {
+        append("== FEED ==")
+        val started = System.currentTimeMillis()
+        val result = container.content.feed(1)
+        append(
+            "items=" + result.items.size +
+                " stale=" + result.stale +
+                " error=" + (result.error ?: "none") +
+                " elapsed=" + (System.currentTimeMillis() - started) + "ms"
+        )
+        for (video in result.items.take(limit)) {
+            append("[" + video.sourceId + "] " + video.title.take(70))
         }
     }
 
     private suspend fun showSearch(query: String) {
-        append("== SEARCH ${query} ==")
+        append("== SEARCH $query ==")
         val started = System.currentTimeMillis()
-        var firstMs = -1L
-        var updates = 0
-        var finalSize = 0
-        runCatching {
-            container.content.searchStream(Category.JAV, query).collect { update ->
-                updates++
-                if (firstMs < 0 && update.items.isNotEmpty()) {
-                    firstMs = System.currentTimeMillis() - started
-                }
-                if (update.done) {
-                    finalSize = update.items.size
-                    append(
-                        "search first=" + firstMs + "ms total=" +
-                            (System.currentTimeMillis() - started) + "ms updates=" +
-                            updates + " items=" + finalSize
-                    )
-                }
-            }
-        }.onFailure { append("search failed: " + it.message) }
-        if (firstMs < 0) {
-            append("search first=none total=" + (System.currentTimeMillis() - started) + "ms")
-        }
-    }
-
-    private suspend fun show(category: Category, sourceFilter: String?, limit: Int) {
-        append("== ${category.name} source=${sourceFilter ?: "all"} ==")
-        val started = System.currentTimeMillis()
-        val items = runCatching { container.content.feed(category, 1, sourceFilter = sourceFilter) }
-            .onFailure { append("feed failed: " + it.javaClass.simpleName + " " + it.message) }
-            .getOrDefault(emptyList())
-        append("items=" + items.size + " elapsed=" + (System.currentTimeMillis() - started) + "ms")
-        val bySource = items.groupingBy { it.sourceId }.eachCount().entries
-            .sortedByDescending { it.value }
-            .joinToString(", ") { it.key + ":" + it.value }
-        append("sources: " + bySource)
-        if (category == Category.JAV) {
-            val codes = items.mapNotNull { ContentFilters.productCode(it.title, it.vkey) }
-            val counts = codes.groupingBy { it }.eachCount()
-            val duplicates = counts.filter { it.value > 1 }
-            append(
-                "codes=" + codes.size + " unique=" + counts.size +
-                    " duplicateCodes=" + duplicates.size +
-                    " duplicateItems=" + duplicates.values.sum()
-            )
-            duplicates.entries.sortedByDescending { it.value }.take(8).forEach { entry ->
-                append("  code " + entry.key + " x" + entry.value)
-            }
-        }
-        for (video in items.take(limit)) {
-            val bad = if (category == Category.JAV) {
-                ContentFilters.isLowQuality(video.title, video.vkey)
-            } else {
-                ContentFilters.isCjkTitle(video.title)
-            }
-            append(
-                "[" + video.sourceId + "] " + (if (bad) "BAD " else "") +
-                    video.title.take(70)
-            )
-            Log.i("LocalFeedTest", category.name + "|" + video.sourceId + "|" + video.title)
+        val result = container.content.search(query, 1)
+        append(
+            "items=" + result.items.size +
+                " stale=" + result.stale +
+                " error=" + (result.error ?: "none") +
+                " elapsed=" + (System.currentTimeMillis() - started) + "ms"
+        )
+        for (video in result.items.take(10)) {
+            append("[" + video.sourceId + "] " + video.title.take(70))
         }
     }
 

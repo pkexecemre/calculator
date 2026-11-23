@@ -48,7 +48,6 @@ import com.simplecalculator.app.Container
 import com.simplecalculator.app.R
 import com.simplecalculator.app.core.formatDuration
 import com.simplecalculator.app.core.formatViews
-import com.simplecalculator.app.data.source.SeriesGroup
 import com.simplecalculator.app.data.source.VideoSummary
 import com.simplecalculator.app.ui.theme.Surface2
 import com.simplecalculator.app.ui.theme.TextMuted
@@ -284,70 +283,6 @@ fun VideoCard(
                 }
             }
         }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun SeriesCard(
-    group: SeriesGroup,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    watchedEpisodes: Int = 0,
-    onLongClick: (() -> Unit)? = null
-) {
-    Column(
-        modifier
-            .clip(RoundedCornerShape(16.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-    ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f)) {
-            PosterThumb(group.thumb, Modifier.fillMaxSize())
-            Box(
-                Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(6.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color.Black.copy(alpha = 0.72f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = if (watchedEpisodes > 0) {
-                        stringResource(
-                            R.string.series_progress,
-                            watchedEpisodes,
-                            group.displayEpisodes
-                        )
-                    } else {
-                        androidx.compose.ui.res.pluralStringResource(
-                            R.plurals.series_episode_count,
-                            group.displayEpisodes,
-                            group.displayEpisodes
-                        )
-                    },
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        val translatedGroup = translatedTitle(group.title, enabled = true)
-        Text(
-            text = translatedGroup ?: group.title,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Text(
-            text = group.sourceIds.joinToString(" · "),
-            style = MaterialTheme.typography.labelSmall,
-            color = TextMuted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 

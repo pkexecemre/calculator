@@ -16,14 +16,6 @@ class App : Application(), ImageLoaderFactory {
         super.onCreate()
         container = Container(this)
         WorkManager.getInstance(this)
-        // After an app upgrade, retry sources that were paused by the previous
-        // build. A new certificate/network fix must not inherit a 30-minute
-        // pause list, so this happens before the first feed can read it.
-        val prefs = getSharedPreferences("calc_state", MODE_PRIVATE)
-        if (prefs.getInt("health_version", 0) != BuildConfig.VERSION_CODE) {
-            container.health.resetAll(container.sources.all())
-            prefs.edit().putInt("health_version", BuildConfig.VERSION_CODE).apply()
-        }
         // Off the main thread: unpack the bundled speech model on first run.
         Thread {
             runCatching { kotlinx.coroutines.runBlocking { container.modelStore.ensureBundled() } }

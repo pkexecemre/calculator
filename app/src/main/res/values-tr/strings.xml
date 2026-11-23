@@ -29,6 +29,7 @@
     <string name="player_resume">Devam et</string>
     <string name="nav_settings">Ayarlar</string>
 
+    <string name="home_title">Pornhub</string>
     <string name="home_for_you">Sana göre</string>
     <string name="home_subtitle">Takip ettiğin yıldızlara göre sıralanır</string>
     <string name="home_refresh">Yenile</string>
@@ -80,14 +81,19 @@
     <string name="gate_body">Uygulamanın bu bölümü yetişkin animasyonudur ve diğerinden ayrıdır. 18 yaşında veya üstünde olduğunu doğrula.</string>
     <string name="gate_accept">18 yaşından büyüğüm</string>
     <string name="home_empty_title">Bir şey yüklenmedi</string>
-    <string name="home_empty_body">Şu anda bir şey yüklenemedi. Yenilemek için aşağı çek.</string>
+    <string name="home_empty_body">Pornhub\'a ulaşılamadı. Bağlantını kontrol edip tekrar dene.</string>
+    <string name="home_failed">Pornhub\'a ulaşılamadı.</string>
+    <string name="home_offline_banner">Kayıtlı videolar gösteriliyor. Pornhub\'a ulaşılamıyor.</string>
 
     <string name="search_hint">Video ara</string>
+    <string name="search_subtitle">Pornhub</string>
     <string name="search_results">%1$d sonuç</string>
     <string name="search_empty">Sonuç yok</string>
     <string name="search_empty_body">Daha kısa ya da farklı bir arama dene.</string>
     <string name="search_prompt_title">Arama</string>
     <string name="search_prompt_body">Bir şey yaz ve ara.</string>
+    <string name="search_failed">Pornhub\'a ulaşılamadı.</string>
+    <string name="search_offline_banner">Kayıtlı sonuçlar gösteriliyor. Pornhub\'a ulaşılamıyor.</string>
 
     <string name="stars_empty_title">Takip edilen yıldız yok</string>
     <string name="stars_empty_body">Bir video aç ve yükleyicisini takip et. Kataloğu sıralamana girer.</string>
@@ -129,8 +135,8 @@
     <string name="settings_msg_code">Kod güncellendi</string>
     <string name="settings_msg_checking">Kaynaklar kontrol ediliyor...</string>
     <string name="settings_msg_checked">Kaynaklar kontrol edildi</string>
-    <string name="settings_translate">Japonca başlıkları çevir</string>
-    <string name="settings_translate_body">JAV gezinirken başlıklar Türkçeye makine çevirisiyle gelir.</string>
+    <string name="settings_translate">Başlıkları çevir</string>
+    <string name="settings_translate_body">Gezinirken başlıklar cihaz diline makine çevirisiyle gelir.</string>
     <string name="settings_live_captions">Canlı altyazı</string>
     <string name="settings_live_captions_body">Video oynarken sesi bu cihazda yazıya çevirir.</string>
     <string name="stt_off_short">Kapalı</string>
@@ -180,7 +186,7 @@
     <string name="settings_hidden_cleared">Gizlenenler temizlendi</string>
     <string name="settings_hidden_body">Akışta bir karta uzun basarak gizle. Geri getirmek için buraya dokun.</string>
     <string name="settings_about">Hakkında</string>
-    <string name="settings_about_body">Kaynaklar takılabilir; her biri kendi kataloğunu ekler.</string>
+    <string name="settings_about_body">Tek kaynaklı bir Pornhub istemcisi. Reklam yok, telemetri yok, hesap yok.</string>
 
     <string name="player_missing">Bu video artık yok. Akıştan tekrar aç.</string>
     <string name="common_back">Geri</string>

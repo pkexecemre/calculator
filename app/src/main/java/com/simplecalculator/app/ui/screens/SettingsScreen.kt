@@ -37,7 +37,6 @@ import androidx.core.os.LocaleListCompat
 import com.simplecalculator.app.BuildConfig
 import com.simplecalculator.app.R
 import com.simplecalculator.app.core.Session
-import com.simplecalculator.app.data.source.Category
 import com.simplecalculator.app.ui.CategoryTabs
 import com.simplecalculator.app.ui.LocalContainer
 import com.simplecalculator.app.ui.theme.TextMuted

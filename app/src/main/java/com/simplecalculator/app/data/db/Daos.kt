@@ -18,6 +18,9 @@ interface VideoDao {
     @Query("SELECT * FROM videos WHERE category = :category ORDER BY cachedAt DESC LIMIT 60")
     suspend fun byCategory(category: String): List<VideoEntity>
 
+    @Query("SELECT * FROM videos WHERE key IN (:keys)")
+    suspend fun byKeys(keys: List<String>): List<VideoEntity>
+
     @Query("DELETE FROM videos WHERE key = :key")
     suspend fun delete(key: String)
 

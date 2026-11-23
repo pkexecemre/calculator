@@ -1,574 +1,346 @@
 package com.simplecalculator.app.data.repo
 
+import android.content.Context
+import android.content.SharedPreferences
 import com.simplecalculator.app.data.db.AppDb
 import com.simplecalculator.app.data.db.EventEntity
+import com.simplecalculator.app.data.db.FavoriteEntity
+import com.simplecalculator.app.data.db.HistoryEntity
 import com.simplecalculator.app.data.db.StarEntity
 import com.simplecalculator.app.data.db.VideoEntity
 import com.simplecalculator.app.data.net.NetworkErrors
 import com.simplecalculator.app.data.rank.Ranker
 import com.simplecalculator.app.data.source.Category
 import com.simplecalculator.app.data.source.CommentItem
-import com.simplecalculator.app.data.source.ContentFilters
-import com.simplecalculator.app.data.source.hentai.AkiHSource
 import com.simplecalculator.app.data.source.ListingKind
 import com.simplecalculator.app.data.source.Source
-import com.simplecalculator.app.data.source.SearchRelevance
-import com.simplecalculator.app.data.source.SeriesGroup
-import com.simplecalculator.app.data.source.SeriesGrouping
-import com.simplecalculator.app.data.source.SeriesStore
-import com.simplecalculator.app.data.source.SourceHealth
 import com.simplecalculator.app.data.source.SourceRegistry
-import com.simplecalculator.app.data.source.Tags
 import com.simplecalculator.app.data.source.VideoDetail
 import com.simplecalculator.app.data.source.VideoSummary
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import java.util.Collections
 
+/**
+ * Single-source Pornhub repository.
+ *
+ * The app has exactly one network dependency, so the contract is simple: every
+ * read either returns fresh data, returns the last good data with `stale = true`,
+ * or returns an empty list plus a human-readable error. It never throws at the
+ * screen and it never blanks a previously loaded feed because a refresh failed.
+ */
 class ContentRepository(
+    context: Context,
     private val db: AppDb,
     private val sources: SourceRegistry,
     private val ranker: Ranker,
-    private val health: SourceHealth,
     private val hidden: com.simplecalculator.app.core.HiddenStore? = null
 ) {
-    /** Drops anything the user dismissed, by key or by series title. */
-    /**
-     * JAV has real release flavours (uncensored leaks, subtitled cuts) and the
-     * live sites tag subtitled uploads in their titles. Filtering happens after
-     * the merge so every source follows the same rule.
-     */
-    private fun List<VideoSummary>.filterReleases(
-        category: Category,
-        releaseFilter: String?
-    ): List<VideoSummary> {
-        if (releaseFilter == null) return this
-        val filtered = when (releaseFilter) {
-            RELEASE_UNCENSORED -> filter {
-                com.simplecalculator.app.data.source.JavTitles.isUncensored(it.title, it.vkey)
-            }
-            RELEASE_SUBTITLED -> filter {
-                com.simplecalculator.app.data.source.JavTitles.isSubtitled(it.title, it.vkey)
-            }
-            else -> this
-        }
-        // Uncensored leaks are sparsely tagged, so fall back rather than showing
-        // an empty tab. "Subtitled" is a strict promise: no silent substitution.
-        return if (releaseFilter == RELEASE_UNCENSORED) filtered.ifEmpty { this } else filtered
-    }
+    data class FeedResult(
+        val items: List<VideoSummary> = emptyList(),
+        val stale: Boolean = false,
+        val error: String? = null
+    )
 
-    /** Category-level content policy applied to every merged feed. */
-    private fun List<VideoSummary>.filterContent(
-        category: Category,
-        sourceFilter: String?
-    ): List<VideoSummary> = ContentFilters.filterFeed(this, category, sourceFilter)
+    data class SearchResult(
+        val items: List<VideoSummary> = emptyList(),
+        val stale: Boolean = false,
+        val error: String? = null
+    )
 
-    private fun rankBonus(category: Category): (VideoSummary) -> Double =
-        ContentFilters.rankBonus(category)
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("feed_cache", Context.MODE_PRIVATE)
 
-    private fun List<VideoSummary>.withoutHidden(): List<VideoSummary> {
-        val store = hidden ?: return this
-        val keys = store.keys()
-        if (keys.isEmpty()) return this
-        val titles = store.titles().map { it.lowercase() }.toSet()
-        return filterNot { video ->
-            video.key in keys ||
-                titles.any { it.isNotBlank() && video.title.lowercase().contains(it) }
-        }
-    }
-    private val sourceGate = Semaphore(MAX_PARALLEL_SOURCES)
+    private val pageCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<VideoSummary>>>()
+    private val searchCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<VideoSummary>>>()
+    private val detailCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, VideoDetail>>()
+    private val commentsCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<CommentItem>>>()
+    private val relatedCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<VideoSummary>>>()
 
-    /** The live-action source owns follows and watch affinity. */
-    private val primary get() = sources.primary()
-
-    /** Display names of the sources that failed on the most recent feed load. */
-    var lastFailures: List<String> = emptyList()
-        private set
+    private val source: Source get() = sources.primary()
 
     fun sourceFor(key: String): Source? = sources.byId(key.substringBefore(":"))
 
-    /** One incremental feed update: what we have so far, and whether all sources replied. */
-    data class FeedUpdate(
-        val items: List<VideoSummary>,
-        val failures: List<String>,
-        val done: Boolean
-    )
-
-    /** Same idea for search: cards appear as each source answers. */
-    data class SearchUpdate(
-        val items: List<VideoSummary>,
-        val failures: List<String>,
-        val done: Boolean
-    )
+    // ---------------------------------------------------------------- feed
 
     /**
-     * Feed that renders source by source instead of waiting for the slowest one.
-     * On a slow connection the first cards show up in well under a second.
+     * Room-backed first paint. The ordered keys of the last successful page 1
+     * are stored in SharedPreferences, so an offline launch shows exactly the
+     * feed the viewer saw last time instead of an arbitrary sample.
      */
-    fun feedStream(
-        category: Category,
-        page: Int = 1,
-        tagFilter: String? = null,
-        sourceFilter: String? = null,
-        releaseFilter: String? = null
-    ): Flow<FeedUpdate> = channelFlow {
-        val tagQuery = if (category == Category.HENTAI || category == Category.JAV) {
-            tagFilter?.let(Tags::label)
-        } else {
-            null
-        }
-        val kind = if (tagQuery != null) ListingKind.SEARCH else ListingKind.TRENDING
-        val active = sources.byCategory(category)
-            .filter { source ->
-                if (sourceFilter != null) source.id == sourceFilter else source.defaultInFeed
-            }
-        val acc = java.util.Collections.synchronizedList(ArrayList<VideoSummary>())
-        val failures = java.util.Collections.synchronizedList(ArrayList<String>())
-
-        coroutineScope {
-            active.forEach { source ->
-                launch(Dispatchers.IO) {
-                    val sourceStarted = System.nanoTime()
-                    val items = fetchOne(source, kind, page, tagQuery, failures)
-                    android.util.Log.d(
-                        "FeedPerf",
-                        "stream " + source.id + " items=" + items.size +
-                            " " + ((System.nanoTime() - sourceStarted) / 1_000_000) + "ms"
-                    )
-                    if (items.isNotEmpty()) {
-                        acc.addAll(items)
-                        // The first cards stream in before ranking; apply the
-                        // same content policy so nothing unwanted flashes.
-                        val preview = acc.toList()
-                            .withoutHidden()
-                            .filterReleases(category, releaseFilter)
-                            .filterContent(category, sourceFilter)
-                        send(FeedUpdate(preview, failures.toList(), done = false))
-                    }
-                }
-            }
-        }
-
-        val raw = if (sourceFilter != null) expandCards(acc.toList()) else acc.toList()
-        val pool = raw.withoutHidden()
-            .filterReleases(category, releaseFilter)
-            .filterContent(category, sourceFilter)
-        lastFailures = failures.toList().sorted()
-        if (pool.isEmpty()) {
-            send(FeedUpdate(emptyList(), lastFailures, done = true))
-            return@channelFlow
-        }
-        upsertAll(pool)
-        val followed = followedSlugs()
-        val ranked = ranker.rank(
-            candidates = pool,
-            followedSlugs = followed,
-            affinity = affinity(),
-            seen = db.events().recentVideos().toSet(),
-            bonus = rankBonus(category)
-        )
-        val isStarred: (VideoSummary) -> Boolean =
-            { it.uploaderSlug != null && it.uploaderSlug in followed }
-        val ordered = ranker.mix(ranked.filterNot(isStarred), ranked.filter(isStarred))
-        send(FeedUpdate(ordered, lastFailures, done = true))
-    }.flowOn(Dispatchers.Default)
-
-    private suspend fun fetchOne(
-        source: Source,
-        kind: ListingKind,
-        page: Int,
-        query: String?,
-        failures: MutableList<String>
-    ): List<VideoSummary> {
-        // Paused sources are deliberately skipped; do not report them as broken.
-        if (health.isPaused(source.id)) return emptyList()
-        return try {
-            val items = withTimeout(SOURCE_TIMEOUT_MS) {
-                source.listing(kind, page, query, null)
-            }
-            health.recordSuccess(source.id)
-            items
-        } catch (e: CancellationException) {
-            if (e is TimeoutCancellationException) {
-                health.recordFailure(source.id, "timeout")
-                failures.add(source.displayName)
-                emptyList()
-            } else {
-                throw e
-            }
-        } catch (e: Exception) {
-            health.recordFailure(source.id, NetworkErrors.describe(e))
-            failures.add(source.displayName)
-            emptyList()
-        }
-    }
-
-    private val pageCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<VideoSummary>>>()
-
-    private fun pageKey(
-        category: Category,
-        page: Int,
-        tag: String?,
-        source: String?,
-        releaseFilter: String? = null
-    ) = "${category.name}|$page|${tag.orEmpty()}|${source.orEmpty()}|${releaseFilter.orEmpty()}"
-
-    /** Prefetches a page so the next scroll is instant. Best effort only. */
-    suspend fun prefetchPage(
-        category: Category,
-        page: Int,
-        tagFilter: String? = null,
-        sourceFilter: String? = null,
-        releaseFilter: String? = null
-    ) {
-        val key = pageKey(category, page, tagFilter, sourceFilter, releaseFilter)
-        val cached = pageCache[key]
-        if (cached != null && System.currentTimeMillis() - cached.first < PAGE_TTL_MS) return
-        runCatching { feed(category, page, tagFilter, sourceFilter, releaseFilter) }
-    }
-
-    suspend fun feed(
-        category: Category,
-        page: Int = 1,
-        tagFilter: String? = null,
-        sourceFilter: String? = null,
-        releaseFilter: String? = null
-    ): List<VideoSummary> {
-        val cacheKey = pageKey(category, page, tagFilter, sourceFilter, releaseFilter)
-        pageCache[cacheKey]?.let { (at, items) ->
-            if (System.currentTimeMillis() - at < PAGE_TTL_MS) return items
-        }
-        val result = feedUncached(category, page, tagFilter, sourceFilter, releaseFilter)
-        if (result.isNotEmpty()) {
-            if (pageCache.size > 24) pageCache.clear()
-            pageCache[cacheKey] = System.currentTimeMillis() to result
-        }
-        return result
-    }
-
-    private suspend fun feedUncached(
-        category: Category,
-        page: Int,
-        tagFilter: String?,
-        sourceFilter: String?,
-        releaseFilter: String?
-    ): List<VideoSummary> {
-        // Tags are a single selection. Search is the only listing mode every
-        // registered source implements, so a tag becomes a query instead of a
-        // source-specific slug (which broke on HentaiCloud and Iwara).
-        val tagQuery = if (category == Category.HENTAI || category == Category.JAV) {
-            tagFilter?.let(Tags::label)
-        } else {
-            null
-        }
-        val kind = if (tagQuery != null) ListingKind.SEARCH else ListingKind.TRENDING
-        val active = sources.byCategory(category)
-            .filter { source ->
-                if (sourceFilter != null) source.id == sourceFilter else source.defaultInFeed
-            }
-        // With a single source selected the pool is small enough to expand
-        // series cards right away, so the badge shows the real episode count.
-        val rawPool = if (sourceFilter != null) {
-            expandCards(fetchAll(active, kind, page, tagQuery))
-        } else {
-            fetchAll(active, kind, page, tagQuery)
-        }
-        val pool = rawPool.withoutHidden()
-            .filterReleases(category, releaseFilter)
-            .filterContent(category, sourceFilter)
-
-        if (pool.isEmpty()) return emptyList()
-        upsertAll(pool)
-        val followed = followedSlugs()
-        val ranked = ranker.rank(
-            candidates = pool,
-            followedSlugs = followed,
-            affinity = affinity(),
-            seen = db.events().recentVideos().toSet(),
-            bonus = rankBonus(category)
-        )
-        val isStarred: (VideoSummary) -> Boolean =
-            { it.uploaderSlug != null && it.uploaderSlug in followed }
-        val starred = ranked.filter(isStarred)
-        val general = ranked.filterNot(isStarred)
-        return ranker.mix(general, starred)
-    }
-
-    /** Instant first paint: whatever this category last showed, straight from Room. */
-    suspend fun cachedFeed(category: Category, limit: Int = 60): List<VideoSummary> =
+    suspend fun cachedFeed(limit: Int = 60): List<VideoSummary> = withContext(Dispatchers.IO) {
         runCatching {
-            db.videos().byCategory(category.name).take(limit).map { row ->
-                VideoSummary(
-                    sourceId = row.sourceId,
-                    vkey = row.vkey,
-                    title = row.title,
-                    thumb = row.thumb,
-                    durationSec = row.durationSec,
-                    views = row.views,
-                    uploaderSlug = row.uploaderSlug,
-                    uploaderName = row.uploaderName,
-                    verifiedUploader = false,
-                    category = category,
-                    tags = row.tags.split(',').filter { it.isNotBlank() },
-                    flavor = com.simplecalculator.app.data.source.HentaiFlavor.from(row.title)
-                )
-            }.filterContent(category, null)
-        }.onFailure { android.util.Log.w("ContentRepo", "cachedFeed failed", it) }
-            .also { result -> android.util.Log.e("ContentRepo", "cachedFeed(${category.name}) -> ${result.getOrNull()?.size ?: 0}") }
-            .getOrDefault(emptyList())
-
-    private fun filterSearchPool(
-        items: List<VideoSummary>,
-        category: Category,
-        query: String,
-        tagFilter: String?,
-        sourceFilter: String?
-    ): List<VideoSummary> {
-        var pool = items
-        if (sourceFilter != null) pool = pool.filter { it.sourceId == sourceFilter }
-        if (tagFilter != null) {
-            // Videos store canonical ids, the chip carries an id, and titles use
-            // the human label: accept a match on any of them.
-            val label = Tags.label(tagFilter)
-            pool = pool.filter { video ->
-                video.tags.any { it.equals(tagFilter, true) || it.equals(label, true) } ||
-                    video.title.contains(label, ignoreCase = true)
-            }
-        }
-        val relevant = if (category == Category.HENTAI) {
-            pool.filter { SearchRelevance.matches(it.title, query) }
-        } else {
-            pool
-        }
-        val visible = relevant.withoutHidden()
-        // A query like "SSIS" returns the same catalogue release from several
-        // mirrors. Keep one card per cut instead of repeating it.
-        return if (category == Category.JAV) {
-            visible.distinctBy { ContentFilters.releaseIdentity(it.title, it.vkey) ?: it.key }
-        } else {
-            visible.distinctBy { it.key }
-        }
-    }
-
-    private val searchCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<VideoSummary>>>()
-
-    private fun searchKey(
-        category: Category,
-        query: String,
-        page: Int,
-        sourceFilter: String?,
-        tagFilter: String?
-    ) = category.name + "|" + page + "|" + query.trim().lowercase() + "|" +
-        sourceFilter.orEmpty() + "|" + tagFilter.orEmpty()
-
-    suspend fun search(
-        category: Category,
-        query: String,
-        page: Int,
-        sourceFilter: String? = null,
-        tagFilter: String? = null
-    ): List<VideoSummary> {
-        val key = searchKey(category, query, page, sourceFilter, tagFilter)
-        searchCache[key]?.let { (at, items) ->
-            if (System.currentTimeMillis() - at < SEARCH_TTL_MS) return items
-        }
-        val raw = fetchAll(sources.byCategory(category), ListingKind.SEARCH, page, query)
-        val pool = filterSearchPool(raw, category, query, tagFilter, sourceFilter)
-        val finalPool = if (sourceFilter != null) expandCards(pool) else pool
-        if (finalPool.isNotEmpty()) {
-            if (searchCache.size > 24) searchCache.clear()
-            searchCache[key] = System.currentTimeMillis() to finalPool
-        }
-        upsertAll(finalPool)
-        return finalPool
-    }
-
-    /**
-     * Search that renders source by source instead of making the user wait for
-     * the slowest site. Same filtering rules as [search], with a final ranked-by-
-     * arrival list and one last update for pagination/expansion.
-     */
-    fun searchStream(
-        category: Category,
-        query: String,
-        page: Int = 1,
-        sourceFilter: String? = null,
-        tagFilter: String? = null
-    ): Flow<SearchUpdate> = channelFlow {
-        val cacheKey = searchKey(category, query, page, sourceFilter, tagFilter)
-        searchCache[cacheKey]?.let { (at, cached) ->
-            if (System.currentTimeMillis() - at < SEARCH_TTL_MS) {
-                lastFailures = emptyList()
-                send(SearchUpdate(cached, emptyList(), done = true))
-                return@channelFlow
-            }
-        }
-        val active = sources.byCategory(category)
-            .filter { sourceFilter == null || it.id == sourceFilter }
-        val acc = Collections.synchronizedList(ArrayList<VideoSummary>())
-        val failures = Collections.synchronizedList(ArrayList<String>())
-
-        coroutineScope {
-            active.forEach { source ->
-                launch(Dispatchers.IO) {
-                    val items = fetchOne(source, ListingKind.SEARCH, page, query, failures)
-                    if (items.isNotEmpty()) {
-                        acc.addAll(items)
-                        val preview = filterSearchPool(acc.toList(), category, query, tagFilter, sourceFilter)
-                        lastFailures = failures.toList().sorted()
-                        send(SearchUpdate(preview, lastFailures, done = false))
-                    }
-                }
-            }
-        }
-
-        val pool = filterSearchPool(acc.toList(), category, query, tagFilter, sourceFilter)
-        val finalPool = if (sourceFilter != null) expandCards(pool) else pool
-        if (finalPool.isNotEmpty()) {
-            if (searchCache.size > 24) searchCache.clear()
-            searchCache[cacheKey] = System.currentTimeMillis() to finalPool
-        }
-        upsertAll(finalPool)
-        lastFailures = failures.toList().sorted()
-        send(SearchUpdate(finalPool, lastFailures, done = true))
-    }.flowOn(Dispatchers.Default)
-
-    /**
-     * Opening a series: pull every source for the same title and expand series
-     * cards whose site keeps episodes on a page of their own. Kept out of the
-     * feed path so browsing does not fire one request per card.
-     */
-    /** Expands series cards whose site keeps episodes on a page of their own. */
-    private suspend fun expandCards(items: List<VideoSummary>): List<VideoSummary> {
-        val akih = sources.byId("akih") as? AkiHSource ?: return items
-        return items.flatMap { video ->
-            if (video.sourceId == "akih" && !video.vkey.contains("/watch/")) {
-                runCatching { akih.expandSeries(video) }.getOrDefault(listOf(video))
+            val keys = prefs.getString(KEY_FEED_KEYS, null)
+                ?.split('\n')
+                ?.filter { it.isNotBlank() }
+                ?.take(limit)
+                .orEmpty()
+            val rows = if (keys.isNotEmpty()) {
+                val byKey = db.videos().byKeys(keys).associateBy { it.key }
+                keys.mapNotNull { byKey[it] }
             } else {
-                listOf(video)
+                db.videos().byCategory(Category.LIVE.name).take(limit)
             }
-        }
+            rows.map { it.toSummary() }.withoutHidden()
+        }.getOrDefault(emptyList())
     }
 
-    suspend fun expandGroup(group: SeriesGroup): SeriesGroup {
-        val akih = sources.byId("akih") as? AkiHSource
-        val expandedFromCard = if (akih == null) {
-            group.videos
-        } else {
-            group.videos.flatMap { video ->
-                if (video.sourceId == "akih" && !video.vkey.contains("/watch/")) {
-                    runCatching { akih.expandSeries(video) }.getOrDefault(listOf(video))
-                } else {
-                    listOf(video)
+    suspend fun feed(page: Int = 1): FeedResult = withContext(Dispatchers.IO) {
+        val cacheKey = "p:$page"
+        // Page 1 is refreshed explicitly by the UI; serving it from the short
+        // page cache would make the refresh button a no-op. Later pages may use
+        // the cache because scrolling fires them repeatedly.
+        if (page != 1) {
+            pageCache[cacheKey]?.let { (at, items) ->
+                if (System.currentTimeMillis() - at < PAGE_TTL_MS) {
+                    return@withContext FeedResult(items.withoutHidden())
                 }
             }
         }
-        val others = runCatching {
-            search(Category.HENTAI, group.title, 1)
-        }.getOrDefault(emptyList()).filter { it.title.isNotEmpty() }
 
-        val merged = (expandedFromCard + others)
-            .withoutHidden()
-            .filter { SeriesGrouping.seriesKey(it) == group.key }
-            .distinctBy { SeriesGrouping.episodeKey(it) }
-        if (merged.isEmpty()) return group
-        val rebuilt = SeriesGrouping.rebuild(group, merged)
-        // The player looks videos up by key, so expanded episodes must be cached.
-        upsertAll(rebuilt.videos)
-        return rebuilt
+        try {
+            val pageResult = withTimeout(SOURCE_TIMEOUT_MS) {
+                source.listing(ListingKind.TRENDING, page, null, null)
+            }
+            val visible = pageResult.items
+                .filter { it.vkey.isNotBlank() && it.title.isNotBlank() }
+                .distinctBy { it.key }
+                .withoutHidden()
+
+            if (visible.isEmpty()) {
+                // A genuinely empty page 1 means the site answered with
+                // something other than a feed. Keep the last good screen.
+                if (page == 1) {
+                    val fallback = pageCache[cacheKey]?.second.orEmpty()
+                        .ifEmpty { cachedFeed() }
+                    return@withContext FeedResult(
+                        fallback,
+                        stale = fallback.isNotEmpty(),
+                        error = "Pornhub returned an empty feed"
+                    )
+                }
+                return@withContext FeedResult(emptyList())
+            }
+
+            upsertAll(visible)
+            val ordered = rank(visible)
+            putPage(cacheKey, ordered)
+            if (page == 1) storeFeedKeys(ordered.map { it.key })
+            FeedResult(ordered, stale = pageResult.stale)
+        } catch (e: TimeoutCancellationException) {
+            offlineFeed(cacheKey, page, "Pornhub timed out")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            offlineFeed(cacheKey, page, NetworkErrors.describe(e))
+        }
     }
 
-    private suspend fun fetchAll(
-        active: List<Source>,
-        kind: ListingKind,
-        page: Int,
-        query: String?
-    ): List<VideoSummary> = coroutineScope {
-        val failures = Collections.synchronizedList(ArrayList<String>())
-        val results = active.map { source ->
-            async {
-                when {
-                    health.isPaused(source.id) -> {
-                        failures.add(source.displayName)
-                        emptyList()
-                    }
-                    else -> {
-                        sourceGate.acquire()
-                        val started = System.nanoTime()
-                        try {
-                            val items = withTimeout(SOURCE_TIMEOUT_MS) {
-                                source.listing(kind, page, query, null)
-                            }
-                            health.recordSuccess(source.id)
-                            android.util.Log.d(
-                                "FeedPerf",
-                                "all " + source.id + " items=" + items.size +
-                                    " " + ((System.nanoTime() - started) / 1_000_000) + "ms"
-                            )
-                            items
-                        } catch (e: CancellationException) {
-                            if (e is TimeoutCancellationException) {
-                                health.recordFailure(source.id, "timeout")
-                                failures.add(source.displayName)
-                                emptyList()
-                            } else {
-                                throw e
-                            }
-                        } catch (e: Exception) {
-                            health.recordFailure(source.id, e.message)
-                            failures.add(source.displayName)
-                            emptyList()
-                        } finally {
-                            sourceGate.release()
-                        }
-                    }
+    private suspend fun offlineFeed(cacheKey: String, page: Int, error: String): FeedResult {
+        val fallback = pageCache[cacheKey]?.second.orEmpty()
+            .ifEmpty { if (page == 1) cachedFeed() else emptyList() }
+        return FeedResult(
+            items = fallback,
+            stale = fallback.isNotEmpty(),
+            error = error
+        )
+    }
+
+    /** Prefetches the next page; failures are irrelevant because the UI has cache. */
+    suspend fun prefetchPage(page: Int) {
+        runCatching { feed(page) }
+    }
+
+    private suspend fun rank(items: List<VideoSummary>): List<VideoSummary> = runCatching {
+        val followed = db.stars().followedNow().map { it.rawSlug }.toSet()
+        val affinity = db.events().recentUploaders().groupingBy { it }.eachCount()
+        val seen = db.events().recentVideos().toSet()
+        val ranked = ranker.rank(
+            candidates = items,
+            followedSlugs = followed,
+            affinity = affinity,
+            seen = seen
+        )
+        val isStarred: (VideoSummary) -> Boolean =
+            { it.uploaderSlug != null && it.uploaderSlug in followed }
+        ranker.mix(ranked.filterNot(isStarred), ranked.filter(isStarred))
+    }.getOrDefault(items)
+
+    private fun putPage(key: String, items: List<VideoSummary>) {
+        if (pageCache.size > 24) pageCache.clear()
+        pageCache[key] = System.currentTimeMillis() to items
+    }
+
+    private fun storeFeedKeys(keys: List<String>) {
+        prefs.edit()
+            .putString(KEY_FEED_KEYS, keys.take(60).joinToString("\n"))
+            .putLong(KEY_FEED_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    // -------------------------------------------------------------- search
+
+    suspend fun search(query: String, page: Int = 1): SearchResult = withContext(Dispatchers.IO) {
+        val clean = query.trim()
+        if (clean.isBlank()) return@withContext SearchResult()
+        val cacheKey = "s:" + clean.lowercase() + ":" + page
+        if (page != 1) {
+            searchCache[cacheKey]?.let { (at, items) ->
+                if (System.currentTimeMillis() - at < SEARCH_TTL_MS) {
+                    return@withContext SearchResult(items.withoutHidden())
                 }
             }
-        }.awaitAll()
-        lastFailures = failures.toList().sorted()
-        results.flatten().distinctBy { it.key }
+        }
+
+        try {
+            val pageResult = withTimeout(SOURCE_TIMEOUT_MS) {
+                source.listing(ListingKind.SEARCH, page, clean, null)
+            }
+            val visible = pageResult.items
+                .filter { it.vkey.isNotBlank() && it.title.isNotBlank() }
+                .distinctBy { it.key }
+                .withoutHidden()
+            if (visible.isNotEmpty()) {
+                upsertAll(visible)
+                if (searchCache.size > 24) searchCache.clear()
+                searchCache[cacheKey] = System.currentTimeMillis() to visible
+            }
+            SearchResult(visible, stale = pageResult.stale)
+        } catch (e: TimeoutCancellationException) {
+            offlineSearch(cacheKey, clean, "Pornhub timed out")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            offlineSearch(cacheKey, clean, NetworkErrors.describe(e))
+        }
     }
 
-    suspend fun feedGroups(
-        category: Category,
-        page: Int = 1,
-        tagFilter: String? = null,
-        sourceFilter: String? = null
-    ): List<SeriesGroup> = SeriesStore.putAll(
-        SeriesGrouping.group(feed(category, page, tagFilter, sourceFilter))
-    )
-
-    suspend fun searchGroups(
-        category: Category,
-        query: String,
-        page: Int,
-        sourceFilter: String? = null,
-        tagFilter: String? = null
-    ): List<SeriesGroup> = SeriesStore.putAll(
-        SeriesGrouping.group(search(category, query, page, sourceFilter, tagFilter))
-    )
-
-    suspend fun starFeed(slug: String, page: Int): List<VideoSummary> {
-        val items = primary.listing(ListingKind.STAR, page, null, slug)
-        upsertAll(items)
-        return items
+    private suspend fun offlineSearch(cacheKey: String, query: String, error: String): SearchResult {
+        val fallback = searchCache[cacheKey]?.second.orEmpty().ifEmpty {
+            cachedFeed().filter { it.title.contains(query, ignoreCase = true) }.take(30)
+        }
+        return SearchResult(fallback, stale = fallback.isNotEmpty(), error = error)
     }
+
+    // ---------------------------------------------------------------- stars
+
+    suspend fun starFeed(slug: String, page: Int): List<VideoSummary> = withContext(Dispatchers.IO) {
+        val cacheKey = "star:$slug:$page"
+        pageCache[cacheKey]?.let { (at, items) ->
+            if (System.currentTimeMillis() - at < PAGE_TTL_MS) return@withContext items.withoutHidden()
+        }
+        try {
+            val items = withTimeout(SOURCE_TIMEOUT_MS) {
+                source.listing(ListingKind.STAR, page, null, slug)
+            }.items.withoutHidden().distinctBy { it.key }
+            if (items.isNotEmpty()) {
+                upsertAll(items)
+                putPage(cacheKey, items)
+                items
+            } else {
+                cachedStar(slug)
+            }
+        } catch (e: CancellationException) {
+            if (e is TimeoutCancellationException) cachedStar(slug) else throw e
+        } catch (e: Exception) {
+            cachedStar(slug)
+        }
+    }
+
+    private suspend fun cachedStar(slug: String): List<VideoSummary> =
+        db.videos().byUploader(slug).map { it.toSummary() }.withoutHidden()
+
+    // --------------------------------------------------------------- detail
+
+    suspend fun detailFor(video: VideoEntity): VideoDetail = withContext(Dispatchers.IO) {
+        val cached = detailCache[video.key]
+        if (cached != null && System.currentTimeMillis() - cached.first < DETAIL_TTL_MS) {
+            return@withContext cached.second
+        }
+        try {
+            val pageResult = withTimeout(SOURCE_TIMEOUT_MS) {
+                (sourceFor(video.key) ?: source).detail(video.vkey)
+            }
+            val detail = pageResult.detail
+            if (detail.streams.isNotEmpty() || detail.embedUrl != null) {
+                if (detailCache.size > 40) detailCache.clear()
+                detailCache[video.key] = System.currentTimeMillis() to detail
+                detail
+            } else {
+                // Unavailable/premium page: keep the previous good resolution if
+                // we have one instead of replacing it with an empty player.
+                cached?.second ?: detail
+            }
+        } catch (e: TimeoutCancellationException) {
+            cached?.second ?: throw e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            cached?.second ?: throw e
+        }
+    }
+
+    /** Warms the detail cache; failures are irrelevant here. */
+    suspend fun prefetchDetail(key: String) {
+        val video = db.videos().byKey(key) ?: return
+        if (detailCache.containsKey(key)) return
+        runCatching { detailFor(video) }
+    }
+
+    // --------------------------------------------------------- comments / related
+
+    suspend fun comments(
+        vkey: String,
+        sourceId: String,
+        commentsUrl: String?,
+        offset: Int
+    ): List<CommentItem> = withContext(Dispatchers.IO) {
+        val cacheKey = sourceId + ":" + vkey + ":" + offset
+        commentsCache[cacheKey]?.let { (at, items) ->
+            if (System.currentTimeMillis() - at < COMMENTS_TTL_MS) return@withContext items
+        }
+        val items = runCatching {
+            withTimeout(SOURCE_TIMEOUT_MS) {
+                sources.byId(sourceId)?.comments(vkey, commentsUrl, offset) ?: emptyList()
+            }
+        }.getOrDefault(emptyList())
+        if (items.isNotEmpty() && offset == 0) {
+            if (commentsCache.size > 40) commentsCache.clear()
+            commentsCache[cacheKey] = System.currentTimeMillis() to items
+        }
+        items
+    }
+
+    suspend fun related(vkey: String, sourceId: String, relatedUrl: String?): List<VideoSummary> =
+        withContext(Dispatchers.IO) {
+            val cacheKey = sourceId + ":" + vkey
+            relatedCache[cacheKey]?.let { (at, items) ->
+                if (System.currentTimeMillis() - at < RELATED_TTL_MS) return@withContext items
+            }
+            val items = runCatching {
+                withTimeout(SOURCE_TIMEOUT_MS) {
+                    sources.byId(sourceId)?.related(vkey, relatedUrl) ?: emptyList()
+                }
+            }.getOrDefault(emptyList())
+            if (items.isNotEmpty()) {
+                if (relatedCache.size > 40) relatedCache.clear()
+                relatedCache[cacheKey] = System.currentTimeMillis() to items
+            }
+            // Anything the UI can navigate to must exist in the cache, otherwise
+            // the player opens with no title and no metadata.
+            upsertAll(items)
+            items
+        }
+
+    // -------------------------------------------------------------- library
 
     fun followedStars(): Flow<List<StarEntity>> = db.stars().followed()
 
     suspend fun toggleFollow(slug: String, name: String, avatar: String?) {
-        val key = primary.id + ":" + slug
+        val key = source.id + ":" + slug
         val existing = db.stars().bySlug(key)
         if (existing != null && existing.followed) {
             db.stars().upsert(existing.copy(followed = false))
@@ -576,7 +348,7 @@ class ContentRepository(
             db.stars().upsert(
                 StarEntity(
                     slug = key,
-                    sourceId = primary.id,
+                    sourceId = source.id,
                     rawSlug = slug,
                     name = name,
                     avatar = avatar ?: existing?.avatar,
@@ -590,22 +362,27 @@ class ContentRepository(
 
     suspend fun isFollowing(slug: String?): Boolean {
         if (slug == null) return false
-        val star = db.stars().bySlug(primary.id + ":" + slug) ?: return false
+        val star = db.stars().bySlug(source.id + ":" + slug) ?: return false
         return star.followed
     }
 
-    fun history(): kotlinx.coroutines.flow.Flow<List<com.simplecalculator.app.data.db.HistoryEntity>> =
-        db.history().observeAll()
+    fun history(): Flow<List<HistoryEntity>> = db.history().observeAll()
 
-    fun favorites(): kotlinx.coroutines.flow.Flow<List<com.simplecalculator.app.data.db.FavoriteEntity>> =
-        db.favorites().observeAll()
+    fun favorites(): Flow<List<FavoriteEntity>> = db.favorites().observeAll()
 
     suspend fun progressFor(key: String): Long = db.history().byKey(key)?.positionMs ?: 0L
 
-    suspend fun recordProgress(key: String, sourceId: String, title: String, thumb: String, positionMs: Long, durationMs: Long) {
+    suspend fun recordProgress(
+        key: String,
+        sourceId: String,
+        title: String,
+        thumb: String,
+        positionMs: Long,
+        durationMs: Long
+    ) {
         if (positionMs < 5_000L) return
         db.history().upsert(
-            com.simplecalculator.app.data.db.HistoryEntity(
+            HistoryEntity(
                 key = key,
                 sourceId = sourceId,
                 title = title,
@@ -634,7 +411,7 @@ class ContentRepository(
             false
         } else {
             db.favorites().add(
-                com.simplecalculator.app.data.db.FavoriteEntity(
+                FavoriteEntity(
                     key = key,
                     sourceId = sourceId,
                     title = title,
@@ -650,47 +427,17 @@ class ContentRepository(
 
     suspend fun videoFor(key: String): VideoEntity? = db.videos().byKey(key)
 
-    /**
-     * Detail pages are the slowest request in the app (page fetch + unpacking),
-     * so keep the last handful of them hot. A prefetch while the feed renders
-     * makes "Play" feel instant.
-     */
-    private val detailCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, VideoDetail>>()
-
-    suspend fun detailFor(video: VideoEntity): VideoDetail {
-        val cached = detailCache[video.key]
-        if (cached != null && System.currentTimeMillis() - cached.first < DETAIL_TTL_MS) {
-            return cached.second
-        }
-        val source = sourceFor(video.key) ?: throw IllegalStateException("no source")
-        val detail = source.detail(video.vkey)
-        if (detail.streams.isNotEmpty() || detail.embedUrl != null) {
-            if (detailCache.size > 40) detailCache.clear()
-            detailCache[video.key] = System.currentTimeMillis() to detail
-        }
-        return detail
-    }
-
-    /** Warms the detail cache; failures are irrelevant here. */
-    suspend fun prefetchDetail(key: String) {
-        val video = db.videos().byKey(key) ?: return
-        if (detailCache.containsKey(key)) return
-        runCatching { detailFor(video) }
-    }
-
-
-
     suspend fun applyUploader(key: String, slug: String?, name: String?) {
         if (slug.isNullOrBlank() || name.isNullOrBlank()) return
         val current = db.videos().byKey(key) ?: return
         if (current.uploaderSlug != null) return
         db.videos().upsert(listOf(current.copy(uploaderSlug = slug, uploaderName = name)))
-        val starKey = primary.id + ":" + slug
+        val starKey = source.id + ":" + slug
         if (db.stars().bySlug(starKey) == null) {
             db.stars().upsert(
                 StarEntity(
                     slug = starKey,
-                    sourceId = primary.id,
+                    sourceId = source.id,
                     rawSlug = slug,
                     name = name,
                     avatar = null,
@@ -713,55 +460,23 @@ class ContentRepository(
             )
         )
         val slug = video.uploaderSlug ?: return
-        val existing = db.stars().bySlug(primary.id + ":" + slug)
+        val existing = db.stars().bySlug(source.id + ":" + slug)
         if (existing != null) {
             db.stars().upsert(existing.copy(hits = existing.hits + 1))
         }
     }
 
-    private val commentsCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<CommentItem>>>()
-    private val relatedCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<VideoSummary>>>()
+    // ---------------------------------------------------------------- helpers
 
-    suspend fun comments(vkey: String, sourceId: String, commentsUrl: String?, offset: Int): List<CommentItem> {
-        val cacheKey = sourceId + ":" + vkey + ":" + offset
-        val cached = commentsCache[cacheKey]
-        if (cached != null && System.currentTimeMillis() - cached.first < COMMENTS_TTL_MS) {
-            return cached.second
+    private fun List<VideoSummary>.withoutHidden(): List<VideoSummary> {
+        val store = hidden ?: return this
+        val keys = store.keys()
+        if (keys.isEmpty()) return this
+        val titles = store.titles().map { it.lowercase() }.filter { it.isNotBlank() }.toSet()
+        return filterNot { video ->
+            video.key in keys || titles.any { video.title.lowercase().contains(it) }
         }
-        val items = runCatching {
-            sources.byId(sourceId)?.comments(vkey, commentsUrl, offset) ?: emptyList()
-        }.getOrDefault(emptyList())
-        if (items.isNotEmpty() && offset == 0) {
-            if (commentsCache.size > 40) commentsCache.clear()
-            commentsCache[cacheKey] = System.currentTimeMillis() to items
-        }
-        return items
     }
-
-    suspend fun related(vkey: String, sourceId: String, relatedUrl: String?): List<VideoSummary> {
-        val cacheKey = sourceId + ":" + vkey
-        val cached = relatedCache[cacheKey]
-        if (cached != null && System.currentTimeMillis() - cached.first < RELATED_TTL_MS) {
-            return cached.second
-        }
-        val items = runCatching {
-            sources.byId(sourceId)?.related(vkey, relatedUrl) ?: emptyList()
-        }.getOrDefault(emptyList())
-        if (items.isNotEmpty()) {
-            if (relatedCache.size > 40) relatedCache.clear()
-            relatedCache[cacheKey] = System.currentTimeMillis() to items
-        }
-        // Anything the UI can navigate to must exist in the cache, otherwise the
-        // player opens with no title and no metadata.
-        upsertAll(items)
-        return items
-    }
-
-    private suspend fun followedSlugs(): Set<String> =
-        db.stars().followedNow().map { it.rawSlug }.toSet()
-
-    private suspend fun affinity(): Map<String, Int> =
-        db.events().recentUploaders().groupingBy { it }.eachCount()
 
     private suspend fun upsertAll(items: List<VideoSummary>) {
         if (items.isEmpty()) return
@@ -787,13 +502,12 @@ class ContentRepository(
         for (summary in items) {
             val slug = summary.uploaderSlug ?: continue
             val name = summary.uploaderName ?: continue
-            if (summary.category != Category.LIVE) continue
-            val starKey = primary.id + ":" + slug
+            val starKey = source.id + ":" + slug
             if (db.stars().bySlug(starKey) == null) {
                 db.stars().upsert(
                     StarEntity(
                         slug = starKey,
-                        sourceId = primary.id,
+                        sourceId = source.id,
                         rawSlug = slug,
                         name = name,
                         avatar = null,
@@ -806,15 +520,28 @@ class ContentRepository(
         }
     }
 
+    private fun VideoEntity.toSummary(): VideoSummary = VideoSummary(
+        sourceId = sourceId,
+        vkey = vkey,
+        title = title,
+        thumb = thumb,
+        durationSec = durationSec,
+        views = views,
+        uploaderSlug = uploaderSlug,
+        uploaderName = uploaderName,
+        verifiedUploader = false,
+        category = runCatching { Category.valueOf(category) }.getOrDefault(Category.LIVE),
+        tags = tags.split(',').filter { it.isNotBlank() }
+    )
+
     companion object {
-        private const val SOURCE_TIMEOUT_MS = 12_000L
-        private const val MAX_PARALLEL_SOURCES = 6
+        private const val SOURCE_TIMEOUT_MS = 25_000L
         private const val DETAIL_TTL_MS = 10 * 60 * 1000L
         private const val PAGE_TTL_MS = 3 * 60 * 1000L
         private const val COMMENTS_TTL_MS = 2 * 60 * 1000L
         private const val RELATED_TTL_MS = 5 * 60 * 1000L
         private const val SEARCH_TTL_MS = 2 * 60 * 1000L
-        const val RELEASE_UNCENSORED = "uncensored"
-        const val RELEASE_SUBTITLED = "subtitled"
+        private const val KEY_FEED_KEYS = "feed_keys"
+        private const val KEY_FEED_AT = "feed_at"
     }
 }

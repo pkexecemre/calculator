@@ -1,21 +1,25 @@
 package com.simplecalculator.app.ui.screens
 
+import android.content.Context
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -23,12 +27,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,47 +42,43 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.simplecalculator.app.R
-import com.simplecalculator.app.data.source.Category
-import com.simplecalculator.app.data.source.HentaiFlavor
-import com.simplecalculator.app.data.source.SeriesGroup
-import com.simplecalculator.app.data.source.SeriesGrouping
-import com.simplecalculator.app.data.source.SeriesStore
 import com.simplecalculator.app.data.source.VideoSummary
 import com.simplecalculator.app.ui.EmptyState
-import com.simplecalculator.app.ui.FilterChipRow
 import com.simplecalculator.app.ui.LocalContainer
 import com.simplecalculator.app.ui.SectionHeader
-import com.simplecalculator.app.ui.SeriesCard
 import com.simplecalculator.app.ui.SkeletonCard
 import com.simplecalculator.app.ui.VideoCard
+import com.simplecalculator.app.ui.theme.Surface2
 import com.simplecalculator.app.ui.theme.TextMuted
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 
 @Composable
-fun SearchScreen(
-    category: Category,
-    onOpen: (String) -> Unit,
-    onOpenSeries: (String) -> Unit
-) {
+fun SearchScreen(onOpen: (String) -> Unit) {
     val container = LocalContainer.current
-    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+
     var query by remember { mutableStateOf("") }
     var items by remember { mutableStateOf<List<VideoSummary>>(emptyList()) }
-    var groups by remember { mutableStateOf<List<SeriesGroup>>(emptyList()) }
-    var flavorFilter by remember { mutableStateOf<HentaiFlavor?>(null) }
-    var sourceFilter by remember { mutableStateOf<String?>(null) }
-    var tagFilter by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var loadingMore by remember { mutableStateOf(false) }
     var searched by remember { mutableStateOf(false) }
+    var hasMore by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var stale by remember { mutableStateOf(false) }
     var page by remember { mutableStateOf(1) }
-    var searchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var searchJob by remember { mutableStateOf<Job?>(null) }
+
     val prefs = remember {
-        container.appContext.getSharedPreferences("search_state", android.content.Context.MODE_PRIVATE)
+        container.appContext.getSharedPreferences("search_state", Context.MODE_PRIVATE)
     }
     fun recent(): List<String> =
         prefs.getString("recent", "")!!.split('\n').filter { it.isNotBlank() }
@@ -95,78 +94,72 @@ fun SearchScreen(
     }
 
     fun run(nextPage: Int) {
-        if (query.isBlank() || loading) return
+        val clean = query.trim()
+        if (clean.isBlank() || loading || loadingMore) return
         if (nextPage == 1) {
-            rememberQuery(query)
+            rememberQuery(clean)
             items = emptyList()
-            groups = emptyList()
             searched = false
+            error = null
+            stale = false
+            hasMore = false
         }
         searchJob?.cancel()
+        loadingMore = false
+        if (nextPage == 1) loading = true else loadingMore = true
         searchJob = scope.launch {
-            loading = true
-            page = nextPage
             try {
-                // Every category streams: the first source's hits render while
-                // the rest are still loading. Hentai just groups each update.
-                container.content.searchStream(
-                    category, query.trim(), nextPage, sourceFilter, tagFilter
-                ).collect { update ->
-                    if (category == Category.HENTAI) {
-                        val fresh = SeriesStore.putAll(SeriesGrouping.group(update.items))
-                        val merged = if (nextPage == 1) {
-                            fresh
-                        } else {
-                            (groups + fresh).distinctBy { it.key }
-                        }
-                        groups = if (flavorFilter != null) {
-                            merged.filter { group ->
-                                group.videos.any { it.flavor == flavorFilter }
-                            }
-                        } else {
-                            merged
-                        }
-                        items = emptyList()
-                    } else {
-                        items = if (nextPage == 1) {
-                            update.items
-                        } else {
-                            (items + update.items).distinctBy { it.key }
-                        }
+                val result = container.content.search(clean, nextPage)
+                stale = if (nextPage == 1) result.stale else stale || result.stale
+                error = result.error
+                if (nextPage == 1) {
+                    if (result.items.isNotEmpty()) {
+                        items = result.items
+                        page = 1
+                        hasMore = true
                     }
-                    if (items.isNotEmpty() || groups.isNotEmpty() || update.done) {
-                        searched = true
-                    }
+                } else if (result.items.isNotEmpty()) {
+                    val before = items.size
+                    val merged = (items + result.items).distinctBy { it.key }
+                    items = merged
+                    page = nextPage
+                    // A page with no new cards means pagination is not making
+                    // progress; hide the button instead of repeating it.
+                    hasMore = merged.size > before
+                } else {
+                    hasMore = false
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
+                searched = true
+            } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                error = e.message ?: ""
                 searched = true
             } finally {
-                // Only the current job may clear the loading flag; a canceled
-                // job must not overwrite the replacement search's state.
-                if (searchJob == kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]) {
+                // Only the current job may clear the flags; a cancelled job must
+                // not overwrite the replacement search's state.
+                if (searchJob == currentCoroutineContext()[Job]) {
                     loading = false
+                    loadingMore = false
                     searchJob = null
                 }
             }
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(category) {
+    fun clearQuery() {
         searchJob?.cancel()
         searchJob = null
         loading = false
+        loadingMore = false
+        query = ""
         items = emptyList()
-        groups = emptyList()
-        flavorFilter = null
-        sourceFilter = null
-        tagFilter = null
-        page = 1
         searched = false
+        error = null
+        stale = false
+        hasMore = false
+        page = 1
     }
-
-    val listSize = if (category == Category.HENTAI) groups.size else items.size
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) {
@@ -175,14 +168,7 @@ fun SearchScreen(
                 style = MaterialTheme.typography.headlineSmall
             )
             Text(
-                text = stringResource(
-                    when (category) {
-                        Category.LIVE -> R.string.category_live
-                        Category.JAV -> R.string.category_jav
-                        Category.HENTAI -> R.string.category_hentai
-                        Category.ARCHIVE -> R.string.category_archive
-                    }
-                ),
+                text = stringResource(R.string.search_subtitle),
                 style = MaterialTheme.typography.labelMedium,
                 color = TextMuted
             )
@@ -193,19 +179,19 @@ fun SearchScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
             placeholder = { Text(stringResource(R.string.search_hint)) },
             singleLine = true,
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = com.simplecalculator.app.ui.theme.Surface2,
-                unfocusedContainerColor = com.simplecalculator.app.ui.theme.Surface2,
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Surface2,
+                unfocusedContainerColor = Surface2,
                 focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent
+                unfocusedBorderColor = Color.Transparent
             ),
             leadingIcon = {
                 Icon(Icons.Filled.Search, contentDescription = null, tint = TextMuted)
             },
             trailingIcon = {
                 if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = ""; searched = false; items = emptyList(); groups = emptyList() }) {
+                    IconButton(onClick = { clearQuery() }) {
                         Icon(Icons.Filled.Close, contentDescription = null, tint = TextMuted)
                     }
                 }
@@ -214,27 +200,36 @@ fun SearchScreen(
             keyboardActions = KeyboardActions(onSearch = { run(1) })
         )
 
-        val sourceOptions = remember(category) {
-            listOf(com.simplecalculator.app.ui.FilterOption(null, context.getString(R.string.filter_source_all))) +
-                container.sources.byCategory(category).map {
-                    com.simplecalculator.app.ui.FilterOption(it.id, it.displayName, it.category.name)
+        if (error != null) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(start = 12.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.search_failed),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { run(1) }) {
+                    Text(stringResource(R.string.common_retry))
                 }
-        }
-        FilterChipRow(
-            sourceOptions = sourceOptions,
-            sourceFilter = sourceFilter,
-            tagFilter = tagFilter,
-            onSource = { sourceFilter = it; if (searched) run(1) },
-            onTag = { tagFilter = it; if (searched) run(1) },
-            onReset = {
-                sourceFilter = null
-                tagFilter = null
-                if (searched) run(1)
             }
-        )
-        Spacer(Modifier.height(6.dp))
+        }
+        if (stale) {
+            Text(
+                text = stringResource(R.string.search_offline_banner),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextMuted,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+        }
 
-        if (!searched && recents.isNotEmpty()) {
+        if (!searched && !loading && recents.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -259,7 +254,6 @@ fun SearchScreen(
                         onClick = {
                             query = term
                             run(1)
-                            rememberQuery(term)
                         },
                         label = { Text(term) }
                     )
@@ -267,8 +261,10 @@ fun SearchScreen(
             }
         }
 
+        Spacer(Modifier.height(6.dp))
+
         when {
-            loading && listSize == 0 -> LazyVerticalGrid(
+            loading && items.isEmpty() -> LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 contentPadding = PaddingValues(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -278,50 +274,59 @@ fun SearchScreen(
                 items(6) { SkeletonCard() }
             }
 
-            listSize == 0 -> EmptyState(
-                title = if (searched) stringResource(R.string.search_empty) else stringResource(R.string.search_prompt_title),
-                subtitle = if (searched) stringResource(R.string.search_empty_body) else stringResource(R.string.search_prompt_body),
+            items.isEmpty() -> EmptyState(
+                title = if (searched) {
+                    stringResource(R.string.search_empty)
+                } else {
+                    stringResource(R.string.search_prompt_title)
+                },
+                subtitle = if (searched) {
+                    stringResource(R.string.search_empty_body)
+                } else {
+                    stringResource(R.string.search_prompt_body)
+                },
                 icon = Icons.Filled.Search
             )
 
             else -> LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                contentPadding = PaddingValues(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                    Column {
-                        SectionHeader(stringResource(R.string.search_results, listSize))
-                    }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    SectionHeader(stringResource(R.string.search_results, items.size))
                 }
-                if (category == Category.HENTAI) {
-                    items(groups, key = { it.key }) { group ->
-                        SeriesCard(group = group, onClick = { onOpenSeries(group.key) })
-                    }
-                } else {
-                    items(items, key = { it.key }) { video ->
-                        VideoCard(video = video, onClick = { onOpen(video.key) })
-                    }
+                items(items, key = { it.key }) { video ->
+                    VideoCard(video = video, onClick = { onOpen(video.key) })
                 }
-                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                    androidx.compose.material3.TextButton(
-                        onClick = { run(page + 1) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(stringResource(R.string.common_more))
+                when {
+                    loadingMore -> {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Box(
+                                Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    }
+                    hasMore -> {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            TextButton(
+                                onClick = { run(page + 1) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(stringResource(R.string.common_more))
+                            }
+                        }
                     }
                 }
             }
         }
     }
-
-}
-
-private fun flavorLabel(flavor: HentaiFlavor): Int = when (flavor) {
-    HentaiFlavor.STUDIO -> R.string.flavor_studio
-    HentaiFlavor.USER -> R.string.flavor_user
-    HentaiFlavor.VR -> R.string.flavor_vr
-    HentaiFlavor.UNKNOWN -> R.string.flavor_all
 }
