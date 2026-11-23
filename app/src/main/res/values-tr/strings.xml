@@ -137,6 +137,8 @@
     <string name="settings_msg_checked">Kaynaklar kontrol edildi</string>
     <string name="settings_translate">Başlıkları çevir</string>
     <string name="settings_translate_body">Gezinirken başlıklar cihaz diline makine çevirisiyle gelir.</string>
+    <string name="settings_japanese_feed">Japonca başlıkları göster</string>
+    <string name="settings_japanese_feed_body">Varsayılan olarak kapalı: tek bir Japonca video akışını doldurmaz. Arama ve yıldız sayfalarında görünmeye devam eder.</string>
     <string name="settings_live_captions">Canlı altyazı</string>
     <string name="settings_live_captions_body">Video oynarken sesi bu cihazda yazıya çevirir.</string>
     <string name="stt_off_short">Kapalı</string>

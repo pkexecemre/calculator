@@ -12,6 +12,7 @@ import com.simplecalculator.app.data.net.NetworkErrors
 import com.simplecalculator.app.data.rank.Ranker
 import com.simplecalculator.app.data.source.Category
 import com.simplecalculator.app.data.source.CommentItem
+import com.simplecalculator.app.data.source.FeedPolicy
 import com.simplecalculator.app.data.source.ListingKind
 import com.simplecalculator.app.data.source.Source
 import com.simplecalculator.app.data.source.SourceRegistry
@@ -64,6 +65,19 @@ class ContentRepository(
 
     fun sourceFor(key: String): Source? = sources.byId(key.substringBefore(":"))
 
+    /** Off by default: one Japanese watch must not take over the feed. */
+    fun showJapaneseInFeed(): Boolean = prefs.getBoolean(KEY_SHOW_JAPANESE, false)
+
+    fun setJapaneseInFeed(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_JAPANESE, enabled).apply()
+        // Cached pages were ranked under the old policy; drop them so the next
+        // feed load immediately reflects the switch.
+        pageCache.clear()
+    }
+
+    private fun List<VideoSummary>.feedVisible(): List<VideoSummary> =
+        filter { FeedPolicy.visibleInFeed(it, showJapaneseInFeed()) }
+
     // ---------------------------------------------------------------- feed
 
     /**
@@ -84,7 +98,7 @@ class ContentRepository(
             } else {
                 db.videos().byCategory(Category.LIVE.name).take(limit)
             }
-            rows.map { it.toSummary() }.withoutHidden()
+            rows.map { it.toSummary() }.withoutHidden().feedVisible()
         }.getOrDefault(emptyList())
     }
 
@@ -96,7 +110,7 @@ class ContentRepository(
         if (page != 1) {
             pageCache[cacheKey]?.let { (at, items) ->
                 if (System.currentTimeMillis() - at < PAGE_TTL_MS) {
-                    return@withContext FeedResult(items.withoutHidden())
+                    return@withContext FeedResult(items.withoutHidden().feedVisible())
                 }
             }
         }
@@ -116,6 +130,7 @@ class ContentRepository(
                 if (page == 1) {
                     val fallback = pageCache[cacheKey]?.second.orEmpty()
                         .ifEmpty { cachedFeed() }
+                        .feedVisible()
                     return@withContext FeedResult(
                         fallback,
                         stale = fallback.isNotEmpty(),
@@ -125,8 +140,19 @@ class ContentRepository(
                 return@withContext FeedResult(emptyList())
             }
 
-            upsertAll(visible)
-            val ordered = rank(visible)
+            // Suppress Japanese catalogue uploads by default. If that would
+            // leave nothing at all, keep them but push them to the bottom
+            // instead of showing an empty feed.
+            val filtered = visible.feedVisible()
+            val pool = filtered.ifEmpty { visible }
+            val penalty: (VideoSummary) -> Double = if (filtered.isEmpty()) {
+                { FeedPolicy.rankPenalty(it, showJapaneseInFeed()) }
+            } else {
+                { 0.0 }
+            }
+
+            upsertAll(pool)
+            val ordered = rank(pool, penalty)
             putPage(cacheKey, ordered)
             if (page == 1) storeFeedKeys(ordered.map { it.key })
             FeedResult(ordered, stale = pageResult.stale)
@@ -142,6 +168,7 @@ class ContentRepository(
     private suspend fun offlineFeed(cacheKey: String, page: Int, error: String): FeedResult {
         val fallback = pageCache[cacheKey]?.second.orEmpty()
             .ifEmpty { if (page == 1) cachedFeed() else emptyList() }
+            .feedVisible()
         return FeedResult(
             items = fallback,
             stale = fallback.isNotEmpty(),
@@ -154,15 +181,22 @@ class ContentRepository(
         runCatching { feed(page) }
     }
 
-    private suspend fun rank(items: List<VideoSummary>): List<VideoSummary> = runCatching {
+    private suspend fun rank(
+        items: List<VideoSummary>,
+        penalty: (VideoSummary) -> Double = { 0.0 }
+    ): List<VideoSummary> = runCatching {
         val followed = db.stars().followedNow().map { it.rawSlug }.toSet()
+        // One watch is not a preference. Require a second view before an
+        // uploader can push their whole catalogue into the feed.
         val affinity = db.events().recentUploaders().groupingBy { it }.eachCount()
+            .filterValues { it >= AFFINITY_MIN_VIEWS }
         val seen = db.events().recentVideos().toSet()
         val ranked = ranker.rank(
             candidates = items,
             followedSlugs = followed,
             affinity = affinity,
-            seen = seen
+            seen = seen,
+            bonus = penalty
         )
         val isStarred: (VideoSummary) -> Boolean =
             { it.uploaderSlug != null && it.uploaderSlug in followed }
@@ -543,5 +577,7 @@ class ContentRepository(
         private const val SEARCH_TTL_MS = 2 * 60 * 1000L
         private const val KEY_FEED_KEYS = "feed_keys"
         private const val KEY_FEED_AT = "feed_at"
+        private const val KEY_SHOW_JAPANESE = "show_japanese_feed"
+        private const val AFFINITY_MIN_VIEWS = 2
     }
 }

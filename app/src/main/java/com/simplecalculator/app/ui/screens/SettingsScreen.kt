@@ -54,6 +54,7 @@ fun SettingsScreen() {
     var secureScreen by remember { mutableStateOf(prefs.getBoolean("secure_screen", false)) }
     var lockOnBackground by remember { mutableStateOf(prefs.getBoolean("lock_on_background", true)) }
     var translateTitles by remember { mutableStateOf(prefs.getBoolean("translate_titles", true)) }
+    var showJapanese by remember { mutableStateOf(container.content.showJapaneseInFeed()) }
     var showCodeDialog by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
@@ -115,6 +116,25 @@ fun SettingsScreen() {
                 onCheckedChange = { checked ->
                     translateTitles = checked
                     prefs.edit().putBoolean("translate_titles", checked).apply()
+                }
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.settings_japanese_feed), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = stringResource(R.string.settings_japanese_feed_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = showJapanese,
+                onCheckedChange = { checked ->
+                    showJapanese = checked
+                    container.content.setJapaneseInFeed(checked)
                 }
             )
         }

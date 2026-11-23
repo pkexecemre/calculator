@@ -42,7 +42,14 @@ reason and can be retried.
 **Library** — Saved videos, history with the exact stop position, and a
 continue-watching rail. Followed stars have an avatar, catalog and follow
 state. Ranking mixes uploader affinity, a sighting penalty and diversity so a
-follow biases the feed instead of owning it.
+follow biases the feed instead of owning it. A single view is not a preference:
+an uploader needs a second watch before it can push its catalogue into the feed.
+
+**Feed language** — Pornhub's most-viewed feed mixes Western clips with Japanese
+catalogue uploads. Japanese-script titles and JAV product codes are held back
+from the default feed so watching one Japanese clip cannot flood it with more.
+The toggle in Settings brings them back; search results and star catalogues
+always show them because those are explicit requests.
 
 **Privacy** — Screenshot/recents blocking (FLAG_SECURE), optional biometric
 unlock, lock-on-background (default on) and a one-tap "Lock now".

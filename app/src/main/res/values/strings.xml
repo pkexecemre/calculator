@@ -137,6 +137,8 @@
     <string name="settings_msg_checked">Sources checked</string>
     <string name="settings_translate">Translate titles</string>
     <string name="settings_translate_body">Titles are machine-translated to your language while browsing.</string>
+    <string name="settings_japanese_feed">Show Japanese titles</string>
+    <string name="settings_japanese_feed_body">Off by default: watching one Japanese clip will not flood your feed. Search and star pages still show them.</string>
     <string name="settings_live_captions">Live captions</string>
     <string name="settings_live_captions_body">Transcribes the audio while a video plays, on this device.</string>
     <string name="stt_off_short">Off</string>
