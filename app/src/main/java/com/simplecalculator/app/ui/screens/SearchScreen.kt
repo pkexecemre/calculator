@@ -48,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.simplecalculator.app.R
+import com.simplecalculator.app.data.source.Category
 import com.simplecalculator.app.data.source.VideoSummary
 import com.simplecalculator.app.ui.EmptyState
 import com.simplecalculator.app.ui.LocalContainer
@@ -62,7 +63,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 
 @Composable
-fun SearchScreen(onOpen: (String) -> Unit) {
+fun SearchScreen(category: Category, onOpen: (String) -> Unit) {
     val container = LocalContainer.current
     val scope = rememberCoroutineScope()
 
@@ -80,17 +81,19 @@ fun SearchScreen(onOpen: (String) -> Unit) {
     val prefs = remember {
         container.appContext.getSharedPreferences("search_state", Context.MODE_PRIVATE)
     }
+    // Per-source history: a MISSAV query must not clutter Pornhub recents.
+    val recentKey = "recent:" + category.name
     fun recent(): List<String> =
-        prefs.getString("recent", "")!!.split('\n').filter { it.isNotBlank() }
+        prefs.getString(recentKey, "")!!.split('\n').filter { it.isNotBlank() }
 
-    var recents by remember { mutableStateOf(recent()) }
+    var recents by remember(category) { mutableStateOf(recent()) }
 
     fun rememberQuery(text: String) {
         val clean = text.trim()
         if (clean.length < 2) return
         val next = (listOf(clean) + recents.filterNot { it.equals(clean, ignoreCase = true) }).take(10)
         recents = next
-        prefs.edit().putString("recent", next.joinToString("\n")).apply()
+        prefs.edit().putString(recentKey, next.joinToString("\n")).apply()
     }
 
     fun run(nextPage: Int) {
@@ -109,7 +112,11 @@ fun SearchScreen(onOpen: (String) -> Unit) {
         if (nextPage == 1) loading = true else loadingMore = true
         searchJob = scope.launch {
             try {
-                val result = container.content.search(clean, nextPage)
+                val result = container.content.search(
+                    category = category,
+                    query = clean,
+                    page = nextPage
+                )
                 stale = if (nextPage == 1) result.stale else stale || result.stale
                 error = result.error
                 if (nextPage == 1) {
@@ -168,7 +175,9 @@ fun SearchScreen(onOpen: (String) -> Unit) {
                 style = MaterialTheme.typography.headlineSmall
             )
             Text(
-                text = stringResource(R.string.search_subtitle),
+                text = stringResource(
+                    if (category == Category.JAV) R.string.search_subtitle_msav else R.string.search_subtitle
+                ),
                 style = MaterialTheme.typography.labelMedium,
                 color = TextMuted
             )
@@ -211,7 +220,9 @@ fun SearchScreen(onOpen: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = stringResource(R.string.search_failed),
+                    text = stringResource(
+                        if (category == Category.JAV) R.string.search_failed_msav else R.string.search_failed
+                    ),
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.weight(1f)
                 )
@@ -222,7 +233,9 @@ fun SearchScreen(onOpen: (String) -> Unit) {
         }
         if (stale) {
             Text(
-                text = stringResource(R.string.search_offline_banner),
+                text = stringResource(
+                    if (category == Category.JAV) R.string.search_offline_banner_msav else R.string.search_offline_banner
+                ),
                 style = MaterialTheme.typography.labelSmall,
                 color = TextMuted,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -242,7 +255,7 @@ fun SearchScreen(onOpen: (String) -> Unit) {
                 )
                 TextButton(onClick = {
                     recents = emptyList()
-                    prefs.edit().putString("recent", "").apply()
+                    prefs.edit().putString(recentKey, "").apply()
                 }) { Text(stringResource(R.string.search_clear_recent)) }
             }
             LazyRow(

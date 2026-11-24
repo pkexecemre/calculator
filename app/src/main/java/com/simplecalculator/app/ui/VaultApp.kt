@@ -18,6 +18,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -28,6 +32,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.simplecalculator.app.R
+import com.simplecalculator.app.data.source.Category
 import com.simplecalculator.app.ui.screens.HomeScreen
 import com.simplecalculator.app.ui.screens.LibraryScreen
 import com.simplecalculator.app.ui.screens.PlayerScreen
@@ -40,6 +45,7 @@ import com.simplecalculator.app.ui.theme.TextMuted
 @Composable
 fun VaultApp() {
     val nav = rememberNavController()
+    var category by remember { mutableStateOf(Category.LIVE) }
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val showBar = route == null || (
@@ -69,12 +75,18 @@ fun VaultApp() {
             modifier = Modifier.padding(padding)
         ) {
             composable("home") {
-                HomeScreen(
-                    onOpen = { videoKey -> nav.navigate("player/" + Uri.encode(videoKey)) }
-                )
+                // Each source owns its own scroll position, cache and filter.
+                key(category) {
+                    HomeScreen(
+                        category = category,
+                        onCategoryChange = { category = it },
+                        onOpen = { videoKey -> nav.navigate("player/" + Uri.encode(videoKey)) }
+                    )
+                }
             }
             composable("search") {
                 SearchScreen(
+                    category = category,
                     onOpen = { key -> nav.navigate("player/" + Uri.encode(key)) }
                 )
             }

@@ -84,6 +84,9 @@
     <string name="home_empty_body">Pornhub could not be reached. Check the connection and try again.</string>
     <string name="home_failed">Pornhub could not be reached.</string>
     <string name="home_offline_banner">Showing saved videos. Pornhub is unreachable.</string>
+    <string name="home_failed_msav">MISSAV could not be reached.</string>
+    <string name="home_offline_banner_msav">Showing saved videos. MISSAV is unreachable.</string>
+    <string name="home_empty_body_msav">MISSAV could not be reached. Check the connection and try again.</string>
 
     <string name="search_hint">Search videos</string>
     <string name="search_subtitle">Pornhub</string>
@@ -94,6 +97,9 @@
     <string name="search_prompt_body">Type a query and hit search.</string>
     <string name="search_failed">Pornhub could not be reached.</string>
     <string name="search_offline_banner">Showing saved results. Pornhub is unreachable.</string>
+    <string name="search_subtitle_msav">MISSAV</string>
+    <string name="search_failed_msav">MISSAV could not be reached.</string>
+    <string name="search_offline_banner_msav">Showing saved results. MISSAV is unreachable.</string>
 
     <string name="stars_empty_title">No stars followed</string>
     <string name="stars_empty_body">Open any video and follow its uploader. Their catalog then feeds your ranking.</string>
@@ -135,7 +141,7 @@
     <string name="settings_msg_code">Code updated</string>
     <string name="settings_msg_checking">Checking sources...</string>
     <string name="settings_msg_checked">Sources checked</string>
-    <string name="settings_translate">Translate titles</string>
+    <string name="settings_translate">Translate Japanese titles</string>
     <string name="settings_translate_body">Titles are machine-translated to your language while browsing.</string>
     <string name="settings_japanese_feed">Show Japanese titles</string>
     <string name="settings_japanese_feed_body">Off by default: watching one Japanese clip will not flood your feed. Search and star pages still show them.</string>

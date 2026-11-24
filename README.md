@@ -1,7 +1,7 @@
 # Calculator
 
-An open-source Android client for Pornhub, hidden behind a working calculator.
-Free software under the GPL-3.0: no ads, no accounts, no telemetry.
+An open-source Android client for Pornhub and MISSAV, hidden behind a working
+calculator. Free software under the GPL-3.0: no ads, no accounts, no telemetry.
 
 - **Package:** `com.simplecalculator.app`
 - **Min SDK:** 26 · **Target SDK:** 35
@@ -15,16 +15,21 @@ PBKDF2-SHA256 with a random salt; five wrong entries trigger an increasing
 lockout, and the app re-locks 90 seconds after it goes to the background.
 Audio keeps playing while the vault is locked.
 
-## One source
+## Two sources
 
-**Pornhub is the only source.** The multi-source scrapers are gone: no Live,
-JAV, Hentai or Archive adapters, no shared HTML adapter, no source picker, no
-cross-site merge or series grouping. Nothing in the app talks to another site.
+`main` has exactly two sources: **Pornhub** for the LIVE feed and **MISSAV** for
+JAV. The `phub-only` branch keeps the single-source Pornhub build. There is no
+Hentai/Archive adapter, no source picker, no shared multi-site scraper and no
+cross-site merge.
 
-`PhClient` fetches trending and search listings, model pages, video pages, the
-comment endpoint and the related-video API. `PhParser` turns them into the same
-`VideoSummary` / `VideoDetail` used by the feed, player, downloads and library.
-No WebView is involved in extraction.
+| Source | Category | Extraction |
+|---|---|---|
+| Pornhub | LIVE | HTML → `flashvars` → `mediaDefinitions` → HLS, plus the comment and related APIs |
+| MISSAV | JAV | `/ja` and `/ja/search`, `div.thumbnail` cards, JS-packer → HLS with mirror fallback |
+
+Both implement the same `Source` seam, so the feed, player, downloads and
+library do not change when a source is added or removed. No WebView is involved
+in extraction.
 
 ## Features
 
@@ -45,11 +50,22 @@ state. Ranking mixes uploader affinity, a sighting penalty and diversity so a
 follow biases the feed instead of owning it. A single view is not a preference:
 an uploader needs a second watch before it can push its catalogue into the feed.
 
-**Feed language** — Pornhub's most-viewed feed mixes Western clips with Japanese
-catalogue uploads. Japanese-script titles and JAV product codes are held back
-from the default feed so watching one Japanese clip cannot flood it with more.
-The toggle in Settings brings them back; search results and star catalogues
-always show them because those are explicit requests.
+**JAV categorization (MISSAV)** — The JAV tab keeps MISSAV's release policy:
+hidden-camera / voyeur / toilet titles and compilations are dropped from the
+feed, studio releases with a catalogue code (`SSIS-123`) rank higher, amateur
+`FC2` uploads are penalised, and the same release mirrored with different cuts
+collapses into one search card. The **All / Uncensored / Subtitled** pills use
+the old heuristics: Uncensored falls back to the whole page when nothing is
+tagged as a leak, while Subtitled is strict. Japanese titles are machine
+translated on request and cached; search history is kept separately for LIVE
+and JAV.
+
+**Feed language (LIVE only)** — Pornhub's most-viewed feed mixes Western clips
+with Japanese catalogue uploads. Japanese-script titles, JAV product codes and
+genre-labelled uploads are held back from the LIVE feed so watching one
+Japanese clip cannot flood it with more. The toggle in Settings brings them
+back; the JAV tab, search results and star catalogues are never filtered this
+way because those are explicit requests.
 
 **Privacy** — Screenshot/recents blocking (FLAG_SECURE), optional biometric
 unlock, lock-on-background (default on) and a one-tap "Lock now".
@@ -83,7 +99,8 @@ The conversion concentrated on not showing a blank screen.
   `mostViewed` and `topRated`, and streams are filtered to real `.mp4` /
   `.m3u8` URLs so a `get_media` stub cannot replace a working variant.
 - **Fixture tests.** Captured Pornhub pages in `app/src/test/resources/ph/`
-  and `live/ph.html` run through the real parser; markup drift fails the suite.
+  and MISSAV pages in `app/src/test/resources/missav/` run through the real
+  parsers and JS unpacker; markup drift fails the suite.
 - **Detail prefetch and caching.** A card press warms the detail; resolved
   streams are cached for ten minutes. If a refresh returns an unavailable
   page, the previous good resolution is kept.
@@ -116,9 +133,9 @@ diagnostic activities unexported.
 ./gradlew :app:testDebugUnitTest
 ```
 
-Offline and deterministic: the Pornhub parser against real and archived pages,
-retry policy, the calculator engine, ranking, download arithmetic, captioning
-and PCM decoding.
+Offline and deterministic: both parsers against real and archived pages, the
+JAV release/category policy, retry policy, the calculator engine, ranking,
+download arithmetic, captioning and PCM decoding.
 
 ## Distribution
 

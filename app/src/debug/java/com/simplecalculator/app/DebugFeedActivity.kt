@@ -10,14 +10,14 @@ import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.simplecalculator.app.data.source.Category
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.Executors
 
 /**
- * Debug-only Pornhub inspector: prints the feed and a search result with
- * timing and any error/stale state so the network path can be checked on a
- * device without opening the vault.
+ * Debug-only feed inspector for the two sources: prints each category's feed
+ * and a search result with timing and error/stale state, without the vault.
  *
  * adb shell am start -n com.simplecalculator.app/.DebugFeedActivity
  */
@@ -53,16 +53,18 @@ class DebugFeedActivity : Activity() {
         container = (application as App).container
         worker.execute {
             runBlocking(Dispatchers.IO) {
-                showFeed(limit = 30)
-                showSearch("test")
+                showFeed(Category.LIVE, 30)
+                showFeed(Category.JAV, 30)
+                showSearch(Category.LIVE, "test")
+                showSearch(Category.JAV, "SSIS")
             }
         }
     }
 
-    private suspend fun showFeed(limit: Int) {
-        append("== FEED ==")
+    private suspend fun showFeed(category: Category, limit: Int) {
+        append("== FEED ${category.name} ==")
         val started = System.currentTimeMillis()
-        val result = container.content.feed(1)
+        val result = container.content.feed(category, 1)
         append(
             "items=" + result.items.size +
                 " stale=" + result.stale +
@@ -74,10 +76,10 @@ class DebugFeedActivity : Activity() {
         }
     }
 
-    private suspend fun showSearch(query: String) {
-        append("== SEARCH $query ==")
+    private suspend fun showSearch(category: Category, query: String) {
+        append("== SEARCH ${category.name} $query ==")
         val started = System.currentTimeMillis()
-        val result = container.content.search(query, 1)
+        val result = container.content.search(category, query, 1)
         append(
             "items=" + result.items.size +
                 " stale=" + result.stale +

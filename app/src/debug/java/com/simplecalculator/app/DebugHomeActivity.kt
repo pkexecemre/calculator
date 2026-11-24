@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
+import com.simplecalculator.app.data.source.Category
 import com.simplecalculator.app.ui.LocalContainer
 import com.simplecalculator.app.ui.screens.HomeScreen
 import com.simplecalculator.app.ui.theme.CalculatorTheme
@@ -22,7 +23,11 @@ class DebugHomeActivity : ComponentActivity() {
         setContent {
             CalculatorTheme {
                 CompositionLocalProvider(LocalContainer provides container) {
-                    HomeScreen(onOpen = {})
+                    HomeScreen(
+                        category = Category.LIVE,
+                        onCategoryChange = {},
+                        onOpen = {}
+                    )
                 }
             }
         }

@@ -1,0 +1,75 @@
+package com.simplecalculator.app.data.source
+
+/**
+ * Title-level JAV rules shared by the feed policy and the UI. Parsers stay
+ * dumb; these rules are pure, so the categorization is testable on the JVM.
+ */
+object ContentFilters {
+
+    /**
+     * Hidden-camera / voyeur / toilet content. The JAV tab is for ordinary
+     * studio releases; this kind of title should not own the trending feed.
+     */
+    private val LOW_QUALITY = Regex(
+        """(?i)\b(toilet|toire|hidden[ ._-]?cam(era)?|secret[ ._-]?cam|voyeur|spy[ ._-]?cam|peeping|peep(ing)?|upskirt|scat|poop|urine|golden[ ._-]?shower|pee(ing)?|tousatsu|tosatsu|kakushi.?dori|nozoki|omorashi|houryou|jvip|kissjav_|zip)\b|【\d+人】|コレクション|総集編|トイレ|盗撮|隠し撮り|のぞき|覗き|おもらし|放尿|排泄|スカトロ|うんこ|偷拍|偷窺|偷窥|厕所|廁所"""
+    )
+
+    private val AMATEUR = Regex(
+        """(?i)\b(amateur|homemade|ugc|personal[ ._-]?filming|private[ ._-]?filming|fc2|fc2-ppv)\b|素人|個人撮影|ハメ撮り"""
+    )
+
+    /** JAV product codes such as SSIS-123 or ssis-123. */
+    private val PRODUCT_CODE = Regex("""(?i)\b[a-z]{2,6}[-_]\d{2,5}\b""")
+
+    /** The studio catalogue code (SSIS-123) if the title/slug carries one. */
+    fun productCode(title: String, vkey: String): String? =
+        PRODUCT_CODE.find(title)?.value?.uppercase()?.replace('_', '-')
+            ?: PRODUCT_CODE.find(vkey)?.value?.uppercase()?.replace('_', '-')
+
+    /**
+     * One identity per catalogue release, while still keeping subtitled and
+     * uncensored cuts distinct.
+     */
+    fun releaseIdentity(title: String, vkey: String): String? {
+        val code = productCode(title, vkey) ?: return null
+        val flags = buildString {
+            if (JavTitles.isSubtitled(title, vkey)) append(":sub")
+            if (JavTitles.isUncensored(title, vkey)) append(":unc")
+        }
+        return code + flags
+    }
+
+    fun rankBonus(category: Category): (VideoSummary) -> Double = when (category) {
+        Category.JAV -> { video ->
+            qualityScore(video.title, video.vkey, video.sourceId)
+        }
+        else -> { _ -> 0.0 }
+    }
+
+    fun isLowQuality(title: String, vkey: String): Boolean =
+        LOW_QUALITY.containsMatchIn(title) || LOW_QUALITY.containsMatchIn(vkey)
+
+    fun isAmateur(title: String, vkey: String): Boolean =
+        AMATEUR.containsMatchIn(title) || AMATEUR.containsMatchIn(vkey)
+
+    /**
+     * Positive for normal studio releases and negative for amateur/UGC feeds.
+     * Used only as a ranking nudge; low-quality titles are filtered before
+     * ranking by the feed policy.
+     */
+    fun qualityScore(title: String, vkey: String, sourceId: String): Double {
+        val text = title + " " + vkey
+        var score = 0.0
+        if (PRODUCT_CODE.containsMatchIn(text)) score += 1.2
+        score += when (sourceId) {
+            "msav" -> 1.0
+            "jvs", "jvn", "kjv" -> 0.7
+            "85p", "jvf" -> 0.3
+            "mrd" -> 0.0
+            "tmo" -> -1.5
+            else -> 0.0
+        }
+        if (isAmateur(title, vkey)) score -= 0.8
+        return score
+    }
+}

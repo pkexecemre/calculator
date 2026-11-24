@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -49,12 +50,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.simplecalculator.app.R
+import com.simplecalculator.app.data.repo.ContentRepository
+import com.simplecalculator.app.data.source.Category
 import com.simplecalculator.app.data.source.VideoSummary
 import com.simplecalculator.app.ui.ActionSheet
+import com.simplecalculator.app.ui.CategoryTabs
 import com.simplecalculator.app.ui.EmptyState
 import com.simplecalculator.app.ui.HeroCard
 import com.simplecalculator.app.ui.ImageWarmup
 import com.simplecalculator.app.ui.LocalContainer
+import com.simplecalculator.app.ui.PillChips
 import com.simplecalculator.app.ui.SectionHeader
 import com.simplecalculator.app.ui.SkeletonCard
 import com.simplecalculator.app.ui.Thumb
@@ -68,7 +73,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun HomeScreen(onOpen: (String) -> Unit) {
+fun HomeScreen(
+    category: Category,
+    onCategoryChange: (Category) -> Unit,
+    onOpen: (String) -> Unit
+) {
     val container = LocalContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -83,6 +92,10 @@ fun HomeScreen(onOpen: (String) -> Unit) {
     var stale by remember { mutableStateOf(false) }
     var page by remember { mutableStateOf(1) }
     var menuFor by remember { mutableStateOf<VideoSummary?>(null) }
+    var releaseFilter by remember { mutableStateOf<String?>(null) }
+    // Bumped whenever the category or release filter changes so a page that was
+    // already in flight cannot overwrite the new selection's list.
+    var generation by remember { mutableStateOf(0) }
 
     val history by container.content.history()
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -99,11 +112,17 @@ fun HomeScreen(onOpen: (String) -> Unit) {
 
     /** First page. A failed refresh keeps the cards already on screen. */
     suspend fun loadFirst() {
+        val gen = generation
         if (refreshing) return
         refreshing = true
         if (items.isEmpty()) loading = true
         try {
-            val result = container.content.feed(1)
+            val result = container.content.feed(
+                category = category,
+                page = 1,
+                releaseFilter = releaseFilter
+            )
+            if (gen != generation) return
             error = result.error
             stale = result.stale
             if (result.items.isNotEmpty()) {
@@ -119,22 +138,29 @@ fun HomeScreen(onOpen: (String) -> Unit) {
             throw e
         } catch (e: Exception) {
             // Only the banner changes; the visible list is left untouched.
-            error = e.message ?: ""
+            if (gen == generation) error = e.message ?: ""
         } finally {
-            refreshing = false
-            loading = false
+            if (gen == generation) {
+                refreshing = false
+                loading = false
+            }
         }
     }
 
     /** Next page. Appends what arrives and stops asking once a page comes back empty. */
     suspend fun loadMore() {
+        val gen = generation
         if (loadingMore || refreshing || loading || !hasMore || items.isEmpty()) return
         loadingMore = true
         try {
             val current = page
-            val result = container.content.feed(current + 1)
+            val result = container.content.feed(
+                category = category,
+                page = current + 1,
+                releaseFilter = releaseFilter
+            )
             // A refresh landed while this page was in flight; its list is newer.
-            if (page != current) return
+            if (gen != generation || page != current) return
             result.error?.let { error = it }
             if (result.stale) stale = true
             if (result.items.isNotEmpty()) {
@@ -150,15 +176,33 @@ fun HomeScreen(onOpen: (String) -> Unit) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = e.message ?: ""
+            if (gen == generation) error = e.message ?: ""
         } finally {
-            loadingMore = false
+            if (gen == generation) loadingMore = false
         }
     }
 
-    LaunchedEffect(Unit) {
-        // Instant paint from Room, then the network page replaces it.
-        val cached = runCatching { container.content.cachedFeed() }.getOrDefault(emptyList())
+    LaunchedEffect(category, releaseFilter) {
+        // Switching source or release repaints from Room, then the network page
+        // replaces it. The generation guard drops the previous selection's
+        // in-flight response.
+        generation += 1
+        val gen = generation
+        refreshing = false
+        loadingMore = false
+        loading = true
+        items = emptyList()
+        error = null
+        stale = false
+        page = 1
+        hasMore = true
+        val cached = runCatching {
+            container.content.cachedFeed(
+                category = category,
+                releaseFilter = releaseFilter
+            )
+        }.getOrDefault(emptyList())
+        if (gen != generation) return@LaunchedEffect
         if (cached.isNotEmpty()) {
             items = cached
             loading = false
@@ -180,11 +224,17 @@ fun HomeScreen(onOpen: (String) -> Unit) {
     }
 
     // Warm page two while the user is still reading page one.
-    LaunchedEffect(items.isNotEmpty(), page, loading, hasMore) {
+    LaunchedEffect(category, releaseFilter, items.isNotEmpty(), page, loading, hasMore) {
         if (items.isEmpty() || loading || !hasMore) return@LaunchedEffect
         delay(1_500)
         withContext(Dispatchers.IO) {
-            runCatching { container.content.prefetchPage(page + 1) }
+            runCatching {
+                container.content.prefetchPage(
+                    category = category,
+                    page = page + 1,
+                    releaseFilter = releaseFilter
+                )
+            }
         }
     }
 
@@ -201,6 +251,16 @@ fun HomeScreen(onOpen: (String) -> Unit) {
             }
     }
 
+    val failedText = stringResource(
+        if (category == Category.JAV) R.string.home_failed_msav else R.string.home_failed
+    )
+    val offlineText = stringResource(
+        if (category == Category.JAV) R.string.home_offline_banner_msav else R.string.home_offline_banner
+    )
+    // A strict JAV release filter with no matches is a normal empty page, not
+    // a source failure; filter_release_empty explains it in the empty state.
+    val showBanner = (error != null || stale) && !(releaseFilter != null && items.isEmpty())
+
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         state = gridState,
@@ -210,38 +270,78 @@ fun HomeScreen(onOpen: (String) -> Unit) {
         modifier = Modifier.fillMaxSize()
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.home_title),
-                        style = MaterialTheme.typography.headlineSmall
-                    )
-                    Text(
-                        text = stringResource(R.string.home_subtitle),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = TextMuted
-                    )
-                }
-                IconButton(
-                    onClick = { scope.launch { loadFirst() } },
-                    enabled = !refreshing
-                ) {
-                    if (refreshing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(
+                                if (category == Category.JAV) R.string.home_jav else R.string.home_for_you
+                            ),
+                            style = MaterialTheme.typography.headlineSmall
                         )
-                    } else {
-                        Icon(
-                            Icons.Filled.Refresh,
-                            contentDescription = stringResource(R.string.home_refresh)
+                        Text(
+                            text = stringResource(
+                                if (category == Category.JAV) R.string.home_jav_subtitle else R.string.home_subtitle
+                            ),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextMuted
                         )
                     }
+                    IconButton(
+                        onClick = { scope.launch { loadFirst() } },
+                        enabled = !refreshing
+                    ) {
+                        if (refreshing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                Icons.Filled.Refresh,
+                                contentDescription = stringResource(R.string.home_refresh)
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                CategoryTabs(
+                    labels = listOf(
+                        stringResource(R.string.category_live),
+                        stringResource(R.string.category_jav)
+                    ),
+                    selectedIndex = if (category == Category.JAV) 1 else 0,
+                    onSelect = { index ->
+                        val next = if (index == 0) Category.LIVE else Category.JAV
+                        if (next != category) onCategoryChange(next)
+                    }
+                )
+                if (category == Category.JAV) {
+                    Spacer(Modifier.height(8.dp))
+                    PillChips(
+                        labels = listOf(
+                            stringResource(R.string.jav_all),
+                            stringResource(R.string.jav_uncensored),
+                            stringResource(R.string.release_subtitled)
+                        ),
+                        selectedIndex = when (releaseFilter) {
+                            ContentRepository.RELEASE_UNCENSORED -> 1
+                            ContentRepository.RELEASE_SUBTITLED -> 2
+                            else -> 0
+                        },
+                        onSelect = { index ->
+                            releaseFilter = when (index) {
+                                1 -> ContentRepository.RELEASE_UNCENSORED
+                                2 -> ContentRepository.RELEASE_SUBTITLED
+                                else -> null
+                            }
+                        }
+                    )
                 }
             }
         }
 
-        if (error != null || stale) {
+        if (showBanner) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     if (error != null) {
@@ -254,7 +354,7 @@ fun HomeScreen(onOpen: (String) -> Unit) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = stringResource(R.string.home_failed),
+                                text = failedText,
                                 style = MaterialTheme.typography.labelMedium,
                                 modifier = Modifier.weight(1f)
                             )
@@ -265,7 +365,7 @@ fun HomeScreen(onOpen: (String) -> Unit) {
                     }
                     if (stale) {
                         Text(
-                            text = stringResource(R.string.home_offline_banner),
+                            text = offlineText,
                             style = MaterialTheme.typography.labelSmall,
                             color = TextMuted,
                             modifier = Modifier.padding(start = 12.dp, top = 4.dp)
@@ -340,7 +440,11 @@ fun HomeScreen(onOpen: (String) -> Unit) {
                     ) {
                         EmptyState(
                             title = stringResource(R.string.home_empty_title),
-                            subtitle = stringResource(R.string.home_empty_body),
+                            subtitle = when {
+                                releaseFilter != null -> stringResource(R.string.filter_release_empty)
+                                category == Category.JAV -> stringResource(R.string.home_empty_body_msav)
+                                else -> stringResource(R.string.home_empty_body)
+                            },
                             icon = Icons.Filled.CloudOff,
                             modifier = Modifier.fillMaxWidth().height(260.dp)
                         )

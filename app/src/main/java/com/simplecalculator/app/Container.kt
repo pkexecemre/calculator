@@ -10,6 +10,7 @@ import com.simplecalculator.app.data.net.Ipv4Dns
 import com.simplecalculator.app.data.rank.Ranker
 import com.simplecalculator.app.data.repo.ContentRepository
 import com.simplecalculator.app.data.source.SourceRegistry
+import com.simplecalculator.app.data.source.generic.MissAvSource
 import com.simplecalculator.app.data.source.ph.PhClient
 import com.simplecalculator.app.data.source.ph.PornhubSource
 import com.simplecalculator.app.data.stt.LiveTranscriber
@@ -94,6 +95,8 @@ class Container(context: Context) {
 
     private fun refererFor(host: String): String? = when {
         host.endsWith("pornhub.com") || host.contains("phncdn") -> "https://www.pornhub.com/"
+        host.contains("missav") || host.contains("surrit") || host.contains("fourhoi") ->
+            "https://missav123.com/"
         else -> null
     }
 
@@ -120,8 +123,10 @@ class Container(context: Context) {
             appContext, http, mediaHeaders, modelStore, cueCache
         )
 
-    /** One source. The registry stays so downloads and the player keep a stable seam. */
-    val sources: SourceRegistry = SourceRegistry(listOf(PornhubSource(http)))
+    /** Exactly two sources: Pornhub (LIVE) and MISSAV (JAV). */
+    val sources: SourceRegistry = SourceRegistry(
+        listOf(PornhubSource(http), MissAvSource(http))
+    )
 
     val ranker: Ranker = Ranker()
 

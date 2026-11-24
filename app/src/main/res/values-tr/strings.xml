@@ -84,6 +84,9 @@
     <string name="home_empty_body">Pornhub\'a ulaşılamadı. Bağlantını kontrol edip tekrar dene.</string>
     <string name="home_failed">Pornhub\'a ulaşılamadı.</string>
     <string name="home_offline_banner">Kayıtlı videolar gösteriliyor. Pornhub\'a ulaşılamıyor.</string>
+    <string name="home_failed_msav">MISSAV\'a ulaşılamadı.</string>
+    <string name="home_offline_banner_msav">Kayıtlı videolar gösteriliyor. MISSAV\'a ulaşılamıyor.</string>
+    <string name="home_empty_body_msav">MISSAV\'a ulaşılamadı. Bağlantını kontrol edip tekrar dene.</string>
 
     <string name="search_hint">Video ara</string>
     <string name="search_subtitle">Pornhub</string>
@@ -94,6 +97,9 @@
     <string name="search_prompt_body">Bir şey yaz ve ara.</string>
     <string name="search_failed">Pornhub\'a ulaşılamadı.</string>
     <string name="search_offline_banner">Kayıtlı sonuçlar gösteriliyor. Pornhub\'a ulaşılamıyor.</string>
+    <string name="search_subtitle_msav">MISSAV</string>
+    <string name="search_failed_msav">MISSAV\'a ulaşılamadı.</string>
+    <string name="search_offline_banner_msav">Kayıtlı sonuçlar gösteriliyor. MISSAV\'a ulaşılamıyor.</string>
 
     <string name="stars_empty_title">Takip edilen yıldız yok</string>
     <string name="stars_empty_body">Bir video aç ve yükleyicisini takip et. Kataloğu sıralamana girer.</string>
@@ -135,7 +141,7 @@
     <string name="settings_msg_code">Kod güncellendi</string>
     <string name="settings_msg_checking">Kaynaklar kontrol ediliyor...</string>
     <string name="settings_msg_checked">Kaynaklar kontrol edildi</string>
-    <string name="settings_translate">Başlıkları çevir</string>
+    <string name="settings_translate">Japonca başlıkları çevir</string>
     <string name="settings_translate_body">Gezinirken başlıklar cihaz diline makine çevirisiyle gelir.</string>
     <string name="settings_japanese_feed">Japonca başlıkları göster</string>
     <string name="settings_japanese_feed_body">Varsayılan olarak kapalı: tek bir Japonca video akışını doldurmaz. Arama ve yıldız sayfalarında görünmeye devam eder.</string>

@@ -79,6 +79,7 @@ data class DetailPage(
 interface Source {
     val id: String
     val displayName: String
+    val category: Category get() = Category.LIVE
 
     suspend fun listing(kind: ListingKind, page: Int, query: String?, slug: String?): ListingPage
 
@@ -101,4 +102,6 @@ class SourceRegistry(private val sources: List<Source>) {
     fun primary(): Source = sources.first()
 
     fun all(): List<Source> = sources
+
+    fun byCategory(category: Category): List<Source> = sources.filter { it.category == category }
 }

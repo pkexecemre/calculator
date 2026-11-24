@@ -12,7 +12,9 @@ import com.simplecalculator.app.data.net.NetworkErrors
 import com.simplecalculator.app.data.rank.Ranker
 import com.simplecalculator.app.data.source.Category
 import com.simplecalculator.app.data.source.CommentItem
+import com.simplecalculator.app.data.source.ContentFilters
 import com.simplecalculator.app.data.source.FeedPolicy
+import com.simplecalculator.app.data.source.JavTitles
 import com.simplecalculator.app.data.source.ListingKind
 import com.simplecalculator.app.data.source.Source
 import com.simplecalculator.app.data.source.SourceRegistry
@@ -26,12 +28,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
 /**
- * Single-source Pornhub repository.
+ * Two-source repository: Pornhub (LIVE) and MISSAV (JAV).
  *
- * The app has exactly one network dependency, so the contract is simple: every
- * read either returns fresh data, returns the last good data with `stale = true`,
- * or returns an empty list plus a human-readable error. It never throws at the
- * screen and it never blanks a previously loaded feed because a refresh failed.
+ * Every read either returns fresh data, returns the last good data with
+ * `stale = true`, or returns an empty list plus a human-readable error. It never
+ * throws at the screen and it never blanks a previously loaded feed because a
+ * refresh failed. Category-specific policy lives here so the sources stay dumb.
  */
 class ContentRepository(
     context: Context,
@@ -73,10 +75,52 @@ class ContentRepository(
         // Cached pages were ranked under the old policy; drop them so the next
         // feed load immediately reflects the switch.
         pageCache.clear()
+        searchCache.clear()
     }
 
-    private fun List<VideoSummary>.feedVisible(): List<VideoSummary> =
-        filter { FeedPolicy.visibleInFeed(it, showJapaneseInFeed()) }
+    /** The "hide Japanese" rule belongs to the Pornhub feed only. */
+    private fun List<VideoSummary>.feedVisible(category: Category): List<VideoSummary> {
+        if (category != Category.LIVE) return this
+        val show = showJapaneseInFeed()
+        return filter { FeedPolicy.visibleInFeed(it, show) }
+    }
+
+    /**
+     * Category-specific feed policy. JAV keeps MISSAV's release rules:
+     * hidden-camera/compilation titles are dropped, Uncensored falls back to
+     * the full page when nothing matches, Subtitled is a strict promise.
+     */
+    private fun applyFeedPolicy(
+        items: List<VideoSummary>,
+        category: Category,
+        releaseFilter: String?
+    ): List<VideoSummary> {
+        val base = items
+            .filter { it.vkey.isNotBlank() && it.title.isNotBlank() }
+            .distinctBy { it.key }
+            .withoutHidden()
+
+        val filtered = when (category) {
+            Category.LIVE -> base.feedVisible(category)
+            Category.JAV -> base
+                .filterNot { ContentFilters.isLowQuality(it.title, it.vkey) }
+                .let { filterReleases(it, releaseFilter) }
+            else -> base
+        }
+        // Never blank the Pornhub feed over a language policy.
+        return if (filtered.isEmpty() && base.isNotEmpty() && category == Category.LIVE) base else filtered
+    }
+
+    private fun filterReleases(
+        items: List<VideoSummary>,
+        releaseFilter: String?
+    ): List<VideoSummary> = when (releaseFilter) {
+        RELEASE_UNCENSORED -> items
+            .filter { JavTitles.isUncensored(it.title, it.vkey) }
+            .ifEmpty { items }
+        RELEASE_SUBTITLED -> items.filter { JavTitles.isSubtitled(it.title, it.vkey) }
+        else -> items
+    }
 
     // ---------------------------------------------------------------- feed
 
@@ -85,9 +129,13 @@ class ContentRepository(
      * are stored in SharedPreferences, so an offline launch shows exactly the
      * feed the viewer saw last time instead of an arbitrary sample.
      */
-    suspend fun cachedFeed(limit: Int = 60): List<VideoSummary> = withContext(Dispatchers.IO) {
+    suspend fun cachedFeed(
+        category: Category = Category.LIVE,
+        limit: Int = 60,
+        releaseFilter: String? = null
+    ): List<VideoSummary> = withContext(Dispatchers.IO) {
         runCatching {
-            val keys = prefs.getString(KEY_FEED_KEYS, null)
+            val keys = prefs.getString(feedKeysKey(category), null)
                 ?.split('\n')
                 ?.filter { it.isNotBlank() }
                 ?.take(limit)
@@ -96,79 +144,105 @@ class ContentRepository(
                 val byKey = db.videos().byKeys(keys).associateBy { it.key }
                 keys.mapNotNull { byKey[it] }
             } else {
-                db.videos().byCategory(Category.LIVE.name).take(limit)
+                db.videos().byCategory(category.name).take(limit)
             }
-            rows.map { it.toSummary() }.withoutHidden().feedVisible()
+            val visible = rows.map { it.toSummary() }.withoutHidden().feedVisible(category)
+            if (category == Category.JAV) filterReleases(visible, releaseFilter) else visible
         }.getOrDefault(emptyList())
     }
 
-    suspend fun feed(page: Int = 1): FeedResult = withContext(Dispatchers.IO) {
-        val cacheKey = "p:$page"
+    suspend fun feed(
+        category: Category = Category.LIVE,
+        page: Int = 1,
+        releaseFilter: String? = null
+    ): FeedResult = withContext(Dispatchers.IO) {
+        val cacheKey = "p:${category.name}:$page:${releaseFilter.orEmpty()}"
         // Page 1 is refreshed explicitly by the UI; serving it from the short
         // page cache would make the refresh button a no-op. Later pages may use
         // the cache because scrolling fires them repeatedly.
         if (page != 1) {
             pageCache[cacheKey]?.let { (at, items) ->
                 if (System.currentTimeMillis() - at < PAGE_TTL_MS) {
-                    return@withContext FeedResult(items.withoutHidden().feedVisible())
+                    return@withContext FeedResult(
+                        items.withoutHidden().feedVisible(category)
+                    )
                 }
             }
         }
 
-        try {
-            val pageResult = withTimeout(SOURCE_TIMEOUT_MS) {
-                source.listing(ListingKind.TRENDING, page, null, null)
-            }
-            val visible = pageResult.items
-                .filter { it.vkey.isNotBlank() && it.title.isNotBlank() }
-                .distinctBy { it.key }
-                .withoutHidden()
+        val active = sources.byCategory(category)
+        if (active.isEmpty()) {
+            return@withContext FeedResult(error = "No source for ${category.name}")
+        }
 
-            if (visible.isEmpty()) {
+        try {
+            val listings = active.map { src ->
+                withTimeout(SOURCE_TIMEOUT_MS) {
+                    src.listing(ListingKind.TRENDING, page, null, null)
+                }
+            }
+            val rawItems = listings.flatMap { it.items }
+            val pool = applyFeedPolicy(rawItems, category, releaseFilter)
+            val stale = listings.any { it.stale }
+
+            // An empty release pill is a valid answer, not a network failure.
+            if (pool.isEmpty() && category == Category.JAV &&
+                releaseFilter != null && rawItems.isNotEmpty()
+            ) {
+                return@withContext FeedResult(emptyList())
+            }
+
+            if (pool.isEmpty()) {
                 // A genuinely empty page 1 means the site answered with
                 // something other than a feed. Keep the last good screen.
                 if (page == 1) {
                     val fallback = pageCache[cacheKey]?.second.orEmpty()
-                        .ifEmpty { cachedFeed() }
-                        .feedVisible()
+                        .ifEmpty { cachedFeed(category, releaseFilter = releaseFilter) }
+                        .feedVisible(category)
                     return@withContext FeedResult(
                         fallback,
                         stale = fallback.isNotEmpty(),
-                        error = "Pornhub returned an empty feed"
+                        error = "The source returned an empty feed"
                     )
                 }
                 return@withContext FeedResult(emptyList())
             }
 
-            // Suppress Japanese catalogue uploads by default. If that would
-            // leave nothing at all, keep them but push them to the bottom
-            // instead of showing an empty feed.
-            val filtered = visible.feedVisible()
-            val pool = filtered.ifEmpty { visible }
-            val penalty: (VideoSummary) -> Double = if (filtered.isEmpty()) {
+            // On LIVE, Japanese catalogue uploads are held back by default; if
+            // that would leave nothing, they stay but are ranked last.
+            val suppressed = category == Category.LIVE &&
+                !showJapaneseInFeed() &&
+                pool.any { FeedPolicy.isJapaneseCatalog(it) }
+            val penalty: (VideoSummary) -> Double = if (suppressed) {
                 { FeedPolicy.rankPenalty(it, showJapaneseInFeed()) }
             } else {
                 { 0.0 }
             }
 
             upsertAll(pool)
-            val ordered = rank(pool, penalty)
+            val ordered = rank(pool, category, penalty)
             putPage(cacheKey, ordered)
-            if (page == 1) storeFeedKeys(ordered.map { it.key })
-            FeedResult(ordered, stale = pageResult.stale)
+            if (page == 1) storeFeedKeys(category, ordered.map { it.key })
+            FeedResult(ordered, stale = stale)
         } catch (e: TimeoutCancellationException) {
-            offlineFeed(cacheKey, page, "Pornhub timed out")
+            offlineFeed(cacheKey, category, page, releaseFilter, "The source timed out")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            offlineFeed(cacheKey, page, NetworkErrors.describe(e))
+            offlineFeed(cacheKey, category, page, releaseFilter, NetworkErrors.describe(e))
         }
     }
 
-    private suspend fun offlineFeed(cacheKey: String, page: Int, error: String): FeedResult {
+    private suspend fun offlineFeed(
+        cacheKey: String,
+        category: Category,
+        page: Int,
+        releaseFilter: String?,
+        error: String
+    ): FeedResult {
         val fallback = pageCache[cacheKey]?.second.orEmpty()
-            .ifEmpty { if (page == 1) cachedFeed() else emptyList() }
-            .feedVisible()
+            .ifEmpty { if (page == 1) cachedFeed(category, releaseFilter = releaseFilter) else emptyList() }
+            .feedVisible(category)
         return FeedResult(
             items = fallback,
             stale = fallback.isNotEmpty(),
@@ -177,12 +251,17 @@ class ContentRepository(
     }
 
     /** Prefetches the next page; failures are irrelevant because the UI has cache. */
-    suspend fun prefetchPage(page: Int) {
-        runCatching { feed(page) }
+    suspend fun prefetchPage(
+        category: Category = Category.LIVE,
+        page: Int,
+        releaseFilter: String? = null
+    ) {
+        runCatching { feed(category, page, releaseFilter) }
     }
 
     private suspend fun rank(
         items: List<VideoSummary>,
+        category: Category,
         penalty: (VideoSummary) -> Double = { 0.0 }
     ): List<VideoSummary> = runCatching {
         val followed = db.stars().followedNow().map { it.rawSlug }.toSet()
@@ -191,12 +270,13 @@ class ContentRepository(
         val affinity = db.events().recentUploaders().groupingBy { it }.eachCount()
             .filterValues { it >= AFFINITY_MIN_VIEWS }
         val seen = db.events().recentVideos().toSet()
+        val categoryBonus = ContentFilters.rankBonus(category)
         val ranked = ranker.rank(
             candidates = items,
             followedSlugs = followed,
             affinity = affinity,
             seen = seen,
-            bonus = penalty
+            bonus = { video -> categoryBonus(video) + penalty(video) }
         )
         val isStarred: (VideoSummary) -> Boolean =
             { it.uploaderSlug != null && it.uploaderSlug in followed }
@@ -208,19 +288,26 @@ class ContentRepository(
         pageCache[key] = System.currentTimeMillis() to items
     }
 
-    private fun storeFeedKeys(keys: List<String>) {
+    private fun feedKeysKey(category: Category): String =
+        if (category == Category.LIVE) KEY_FEED_KEYS else KEY_FEED_KEYS + ":" + category.name
+
+    private fun storeFeedKeys(category: Category, keys: List<String>) {
         prefs.edit()
-            .putString(KEY_FEED_KEYS, keys.take(60).joinToString("\n"))
+            .putString(feedKeysKey(category), keys.take(60).joinToString("\n"))
             .putLong(KEY_FEED_AT, System.currentTimeMillis())
             .apply()
     }
 
     // -------------------------------------------------------------- search
 
-    suspend fun search(query: String, page: Int = 1): SearchResult = withContext(Dispatchers.IO) {
+    suspend fun search(
+        category: Category = Category.LIVE,
+        query: String,
+        page: Int = 1
+    ): SearchResult = withContext(Dispatchers.IO) {
         val clean = query.trim()
         if (clean.isBlank()) return@withContext SearchResult()
-        val cacheKey = "s:" + clean.lowercase() + ":" + page
+        val cacheKey = "s:${category.name}:" + clean.lowercase() + ":" + page
         if (page != 1) {
             searchCache[cacheKey]?.let { (at, items) ->
                 if (System.currentTimeMillis() - at < SEARCH_TTL_MS) {
@@ -229,32 +316,46 @@ class ContentRepository(
             }
         }
 
+        val active = sources.byCategory(category)
+        if (active.isEmpty()) return@withContext SearchResult(error = "No source for ${category.name}")
+
         try {
-            val pageResult = withTimeout(SOURCE_TIMEOUT_MS) {
-                source.listing(ListingKind.SEARCH, page, clean, null)
+            val listings = active.map { src ->
+                withTimeout(SOURCE_TIMEOUT_MS) {
+                    src.listing(ListingKind.SEARCH, page, clean, null)
+                }
             }
-            val visible = pageResult.items
-                .filter { it.vkey.isNotBlank() && it.title.isNotBlank() }
-                .distinctBy { it.key }
-                .withoutHidden()
+            val raw = listings.flatMap { it.items }.withoutHidden()
+            // MISSAV mirrors the same release with subtitle/uncensored suffixes;
+            // keep one card per catalogue cut, like the old JAV search did.
+            val visible = if (category == Category.JAV) {
+                raw.distinctBy { ContentFilters.releaseIdentity(it.title, it.vkey) ?: it.key }
+            } else {
+                raw.distinctBy { it.key }
+            }
             if (visible.isNotEmpty()) {
                 upsertAll(visible)
                 if (searchCache.size > 24) searchCache.clear()
                 searchCache[cacheKey] = System.currentTimeMillis() to visible
             }
-            SearchResult(visible, stale = pageResult.stale)
+            SearchResult(visible, stale = listings.any { it.stale })
         } catch (e: TimeoutCancellationException) {
-            offlineSearch(cacheKey, clean, "Pornhub timed out")
+            offlineSearch(cacheKey, category, clean, "The source timed out")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            offlineSearch(cacheKey, clean, NetworkErrors.describe(e))
+            offlineSearch(cacheKey, category, clean, NetworkErrors.describe(e))
         }
     }
 
-    private suspend fun offlineSearch(cacheKey: String, query: String, error: String): SearchResult {
+    private suspend fun offlineSearch(
+        cacheKey: String,
+        category: Category,
+        query: String,
+        error: String
+    ): SearchResult {
         val fallback = searchCache[cacheKey]?.second.orEmpty().ifEmpty {
-            cachedFeed().filter { it.title.contains(query, ignoreCase = true) }.take(30)
+            cachedFeed(category).filter { it.title.contains(query, ignoreCase = true) }.take(30)
         }
         return SearchResult(fallback, stale = fallback.isNotEmpty(), error = error)
     }
@@ -579,5 +680,8 @@ class ContentRepository(
         private const val KEY_FEED_AT = "feed_at"
         private const val KEY_SHOW_JAPANESE = "show_japanese_feed"
         private const val AFFINITY_MIN_VIEWS = 2
+
+        const val RELEASE_UNCENSORED = "uncensored"
+        const val RELEASE_SUBTITLED = "subtitled"
     }
 }
