@@ -11,6 +11,7 @@ import com.simplecalculator.app.data.source.StreamVariant
 import com.simplecalculator.app.data.source.VideoDetail
 import com.simplecalculator.app.data.source.VideoSummary
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -52,31 +53,52 @@ class MissAvSource(private val http: OkHttpClient) : Source {
         const val DIGITS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
     }
 
+    @Volatile
     private var activeBase: String? = null
 
-    private suspend fun fetch(path: String): String = withContext(Dispatchers.IO) {
+    private data class MissAvPage(val body: String, val stale: Boolean = false)
+
+    private suspend fun fetch(path: String): MissAvPage = withContext(Dispatchers.IO) {
         val bases = activeBase?.let { listOf(it) + BASES.filter { b -> b != it } } ?: BASES
         var last: Exception? = null
-        for (base in bases) {
-            val url = if (path.startsWith("http")) path else base + path
-            try {
-                val request = Request.Builder().url(url)
-                    .header("User-Agent", UA)
-                    .header("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
-                    .header("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
-                    .header("Referer", base + "/")
-                    .build()
-                http.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) throw IOException("HTTP ${response.code} for $url")
-                    activeBase = base
-                    return@withContext response.body?.string() ?: ""
+        var lastUrl: String? = null
+        repeat(2) { round ->
+            for (base in bases) {
+                val url = if (path.startsWith("http")) path else base + path
+                lastUrl = url
+                try {
+                    val request = Request.Builder().url(url)
+                        .header("User-Agent", UA)
+                        .header("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+                        .header("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
+                        .header("Referer", base + "/")
+                        .build()
+                    http.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) throw IOException("HTTP ${response.code} for $url")
+                        activeBase = base
+                        return@withContext MissAvPage(response.body?.string() ?: "")
+                    }
+                } catch (e: IOException) {
+                    last = e
                 }
-            } catch (e: IOException) {
-                last = e
             }
+            if (round == 0) delay(400)
         }
+        // Offline fallback: serve the cached page when the network is gone.
+        val stale = lastUrl?.let { staleBody(it) }
+        if (stale != null) return@withContext MissAvPage(stale, true)
         throw last ?: IOException("no mirror answered")
     }
+
+    private fun staleBody(url: String): String? = runCatching {
+        val cacheOnly = Request.Builder().url(url)
+            .header("User-Agent", UA)
+            .cacheControl(okhttp3.CacheControl.Builder().onlyIfCached().maxStale(7, java.util.concurrent.TimeUnit.DAYS).build())
+            .build()
+        http.newCall(cacheOnly).execute().use { response ->
+            if (response.isSuccessful) response.body?.string() else null
+        }
+    }.getOrNull()
 
     override suspend fun listing(
         kind: ListingKind,
@@ -89,8 +111,8 @@ class MissAvSource(private val http: OkHttpClient) : Source {
                 if (page > 1) "?page=$page" else ""
             else -> if (page <= 1) "/ja" else "/ja?page=$page"
         }
-        val html = fetch(path)
-        return ListingPage(parseListing(html, activeBase ?: BASES.first()))
+        val page = fetch(path)
+        return ListingPage(parseListing(page.body, activeBase ?: BASES.first()), page.stale)
     }
 
     internal fun parseListing(html: String, base: String = BASES.first()): List<VideoSummary> {
@@ -156,9 +178,9 @@ class MissAvSource(private val http: OkHttpClient) : Source {
     }
 
     override suspend fun detail(vkey: String): DetailPage {
-        val html = runCatching { fetch(vkey) }
+        val page = runCatching { fetch(vkey) }
             .getOrElse { return DetailPage(VideoDetail(playerMode = PlayerMode.EMBED)) }
-        return DetailPage(parseStreams(html))
+        return DetailPage(parseStreams(page.body), page.stale)
     }
 
     internal fun parseStreams(html: String): VideoDetail {
