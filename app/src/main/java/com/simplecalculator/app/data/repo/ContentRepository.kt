@@ -147,7 +147,13 @@ class ContentRepository(
                 db.videos().byCategory(category.name).take(limit)
             }
             val visible = rows.map { it.toSummary() }.withoutHidden().feedVisible(category)
-            if (category == Category.JAV) filterReleases(visible, releaseFilter) else visible
+            val cleaned = if (category == Category.JAV) {
+                val filtered = visible.filterNot { ContentFilters.isLowQuality(it.title, it.vkey) }
+                filtered.ifEmpty { visible }
+            } else {
+                visible
+            }
+            if (category == Category.JAV) filterReleases(cleaned, releaseFilter) else cleaned
         }.getOrDefault(emptyList())
     }
 
@@ -344,15 +350,21 @@ class ContentRepository(
             } else {
                 raw.distinctBy { it.key }
             }
-            // JAV search benefits from the same studio/product-code ranking as
-            // the feed, plus a small title-match nudge for the query itself.
+            // JAV search keeps the same studio/product-code ordering as the feed
+            // and drops the hidden-camera / compilation junk that MISSAV lists.
+            val cleaned = if (category == Category.JAV) {
+                val filtered = deduped.filterNot { ContentFilters.isLowQuality(it.title, it.vkey) }
+                filtered.ifEmpty { deduped }
+            } else {
+                deduped
+            }
             val visible = if (category == Category.JAV) {
-                deduped.sortedByDescending { video ->
+                cleaned.sortedByDescending { video ->
                     ContentFilters.qualityScore(video.title, video.vkey, video.sourceId) +
                         if (video.title.contains(clean, ignoreCase = true)) 0.5 else 0.0
                 }
             } else {
-                deduped
+                cleaned
             }
             if (visible.isNotEmpty()) {
                 upsertAll(visible)
