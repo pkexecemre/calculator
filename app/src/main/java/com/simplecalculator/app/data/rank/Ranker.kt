@@ -1,7 +1,6 @@
 package com.simplecalculator.app.data.rank
 
 import com.simplecalculator.app.data.source.VideoSummary
-import kotlin.random.Random
 
 /**
  * Feed ranking. Signals, in order of weight:
@@ -30,7 +29,7 @@ class Ranker {
             if (video.key in seen) score -= 1.4
             if (video.viewedBoost()) score += 0.15
             score += bonus(video)
-            video to (score + Random.nextDouble(0.0, 0.45))
+            video to (score + stableJitter(video))
         }
         val ordered = scored.sortedByDescending { it.second }.map { it.first }
         return diversify(ordered)
@@ -86,4 +85,15 @@ class Ranker {
 
     private fun VideoSummary.viewedBoost(): Boolean =
         durationSec in 45..5400 && views > 0
+
+    /**
+     * Deterministic exploration nudge. Using the video key keeps ranking
+     * reproducible for the same input while still spreading similar scores.
+     */
+    private fun stableJitter(video: VideoSummary): Double {
+        var hash = video.key.hashCode()
+        hash = hash xor (hash ushr 16)
+        val normalized = (hash and 0x7fffffff).toDouble() / Int.MAX_VALUE.toDouble()
+        return normalized * 0.45
+    }
 }

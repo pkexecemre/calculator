@@ -161,8 +161,8 @@ fun HomeScreen(
             )
             // A refresh landed while this page was in flight; its list is newer.
             if (gen != generation || page != current) return
-            result.error?.let { error = it }
-            if (result.stale) stale = true
+            error = result.error
+            stale = result.stale
             if (result.items.isNotEmpty()) {
                 val before = items.size
                 val merged = (items + result.items).distinctBy { it.key }

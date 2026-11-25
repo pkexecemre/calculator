@@ -74,7 +74,14 @@ class DownloadWorker(
             }
             Log.w(TAG, "download failed for " + key, e)
             db.downloads().markFailed(key, e.message?.take(160))
-            return Result.failure()
+            // Transient network failures are worth one automatic retry before
+            // the user has to tap Retry. Permanent failures (no playable stream)
+            // are not retried.
+            return if (runAttemptCount < 2 && e is IOException) {
+                Result.retry()
+            } else {
+                Result.failure()
+            }
         }
     }
 

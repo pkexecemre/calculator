@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
@@ -45,7 +46,18 @@ import com.simplecalculator.app.ui.theme.TextMuted
 @Composable
 fun VaultApp() {
     val nav = rememberNavController()
-    var category by remember { mutableStateOf(Category.LIVE) }
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("calc_state", android.content.Context.MODE_PRIVATE) }
+    var category by remember {
+        mutableStateOf(
+            runCatching { Category.valueOf(prefs.getString("home_category", Category.LIVE.name).orEmpty()) }
+                .getOrDefault(Category.LIVE)
+        )
+    }
+    fun applyCategory(next: Category) {
+        category = next
+        prefs.edit().putString("home_category", next.name).apply()
+    }
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val showBar = route == null || (
@@ -79,7 +91,7 @@ fun VaultApp() {
                 key(category) {
                     HomeScreen(
                         category = category,
-                        onCategoryChange = { category = it },
+                        onCategoryChange = { applyCategory(it) },
                         onOpen = { videoKey -> nav.navigate("player/" + Uri.encode(videoKey)) }
                     )
                 }

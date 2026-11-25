@@ -266,15 +266,26 @@ class ContentRepository(
     ): List<VideoSummary> = runCatching {
         val followed = db.stars().followedNow().map { it.rawSlug }.toSet()
         // One watch is not a preference. Require a second view before an
-        // uploader can push their whole catalogue into the feed.
-        val affinity = db.events().recentUploaders().groupingBy { it }.eachCount()
-            .filterValues { it >= AFFINITY_MIN_VIEWS }
+        // uploader can push their whole catalogue into the feed. Recent watches
+        // weigh more than older ones, so a single stale session cannot keep a
+        // channel pinned to the top of the feed.
+        val recent = db.events().recentUploaders()
+        val affinity = LinkedHashMap<String, Int>()
+        recent.forEachIndexed { index, slug ->
+            val weight = when {
+                index < 100 -> 3
+                index < 300 -> 2
+                else -> 1
+            }
+            affinity[slug] = (affinity[slug] ?: 0) + weight
+        }
+        val weightedAffinity = affinity.filterValues { it >= AFFINITY_MIN_VIEWS }
         val seen = db.events().recentVideos().toSet()
         val categoryBonus = ContentFilters.rankBonus(category)
         val ranked = ranker.rank(
             candidates = items,
             followedSlugs = followed,
-            affinity = affinity,
+            affinity = weightedAffinity,
             seen = seen,
             bonus = { video -> categoryBonus(video) + penalty(video) }
         )
@@ -328,10 +339,20 @@ class ContentRepository(
             val raw = listings.flatMap { it.items }.withoutHidden()
             // MISSAV mirrors the same release with subtitle/uncensored suffixes;
             // keep one card per catalogue cut, like the old JAV search did.
-            val visible = if (category == Category.JAV) {
+            val deduped = if (category == Category.JAV) {
                 raw.distinctBy { ContentFilters.releaseIdentity(it.title, it.vkey) ?: it.key }
             } else {
                 raw.distinctBy { it.key }
+            }
+            // JAV search benefits from the same studio/product-code ranking as
+            // the feed, plus a small title-match nudge for the query itself.
+            val visible = if (category == Category.JAV) {
+                deduped.sortedByDescending { video ->
+                    ContentFilters.qualityScore(video.title, video.vkey, video.sourceId) +
+                        if (video.title.contains(clean, ignoreCase = true)) 0.5 else 0.0
+                }
+            } else {
+                deduped
             }
             if (visible.isNotEmpty()) {
                 upsertAll(visible)
